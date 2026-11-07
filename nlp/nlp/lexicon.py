@@ -59,7 +59,7 @@ COMPOUNDS = {
 }
 
 POLITE_PREFIX = (
-    r"(?:hey|ok|okay|robot|please|kindly|could you|can you|would you|will you|"
+    r"(?:hey|hi|hello|yo|howdy|ok|okay|robot|please|kindly|could you|can you|would you|will you|"
     r"i want you to|i need you to|i would like you to|i'd like you to|go ahead and|let's|lets)"
 )
 POLITE_SUFFIX = r"(?:please|for me|now|thanks|thank you)"

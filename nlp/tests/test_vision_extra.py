@@ -80,7 +80,6 @@ def test_no_detector_and_no_color_returns_none():
 
 
 def test_blob_fallback_without_detector_picks_largest_blob():
-    pytest.importorskip("cv2")
     f = blank()
     f[5:15, 5:15] = (220, 20, 20)
     f[40:80, 100:150] = (220, 20, 20)
@@ -88,14 +87,12 @@ def test_blob_fallback_without_detector_picks_largest_blob():
     assert d.bbox == (100, 40, 150, 80)
 
 
-def test_blob_fallback_without_opencv_boxes_all_matching_pixels(monkeypatch):
-    """Known limitation: with no cv2 the fallback can't split blobs, so two red objects give one box."""
+def test_blob_fallback_does_not_need_opencv(monkeypatch):
     monkeypatch.setitem(__import__("sys").modules, "cv2", None)  # makes `import cv2` raise ImportError
     f = blank()
     f[5:15, 5:15] = (220, 20, 20)
     f[40:80, 100:150] = (220, 20, 20)
-    d = Grounder(None).find(f, ObjectRef("screwdriver", "red"))
-    assert d.bbox == (5, 5, 150, 80)
+    assert Grounder(None).find(f, ObjectRef("screwdriver", "red")).bbox == (100, 40, 150, 80)
 
 
 def test_blob_below_min_fraction_is_ignored():

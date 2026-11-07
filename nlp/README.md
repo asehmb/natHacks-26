@@ -44,7 +44,7 @@ det = grounder.find(rgb_frame, action.target)   # Detection(label, bbox, score) 
   and falls back to CPU if an accelerator fails (CoreML currently fails on this model, so it is not used).
 - **Colour** words are checked with HSV on the detected box, so "red bus" returns `None` for a blue bus.
 - **Position/size** words (left, right, nearest, big, small…) choose among multiple matches.
-- `YoloOnnxDetector` (closed-set COCO) and the colour-blob fallback still exist for models without open vocab;
+- `YoloOnnxDetector` (closed-set COCO) and the colour-blob fallback (pure numpy, picks the largest connected region of that colour; no OpenCV needed) still exist for models without open vocab;
   the blob fallback is never used with an open-vocab detector.
 - **License:** the YOLO-World weights are AGPL-3.0 (inherited from Ultralytics). Check this before distributing.
 

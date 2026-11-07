@@ -8,6 +8,7 @@ import numpy as np
 
 from nlp.actions import ObjectRef
 
+from .blobs import largest_blob
 from .hsv import color_fraction, color_mask
 
 
@@ -106,20 +107,10 @@ class Grounder:
 
     def _largest_blob(self, frame: np.ndarray, ref: ObjectRef) -> Optional[Detection]:
         mask = color_mask(frame, ref.color)
-        if mask.mean() < self.min_blob_fraction:
+        found = largest_blob(mask)
+        if found is None:
             return None
-        label = ref.noun or ref.color
-        try:
-            import cv2
-        except ImportError:  # whole-mask bounding box
-            ys, xs = np.nonzero(mask)
-            return Detection(label, (int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1),
-                             float(mask.mean()))
-        n, _, stats, _ = cv2.connectedComponentsWithStats(mask.astype(np.uint8), connectivity=8)
-        if n <= 1:
-            return None
-        i = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
-        x, y, w, h, area = stats[i]
+        bbox, area = found
         if area / mask.size < self.min_blob_fraction:
             return None
-        return Detection(label, (int(x), int(y), int(x + w), int(y + h)), float(area / mask.size))
+        return Detection(ref.noun or ref.color, bbox, float(area / mask.size))

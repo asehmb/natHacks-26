@@ -40,11 +40,17 @@ def correct_tokens(tokens: list[str]) -> list[str]:
     return out
 
 
-def normalize(text: str) -> str:
+def clean(text: str) -> str:
+    """Lowercase and strip punctuation/extra spaces, keeping every word (greetings included)."""
     text = text.lower().replace("’", "'")
     text = re.sub(r"[^a-z0-9\s,.'-]", " ", text)
     text = re.sub(r"(?<!\d)\.|\.(?!\d)", " ", text)  # drop sentence periods, keep decimals
-    text = re.sub(r"\s+", " ", text).strip()
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def normalize(text: str) -> str:
+    """clean() plus removal of polite filler ("please", "could you") for command parsing."""
+    text = clean(text)
     prefix = re.compile(rf"^{L.POLITE_PREFIX}[ ,]+")
     while prefix.match(text):
         text = prefix.sub("", text, count=1)

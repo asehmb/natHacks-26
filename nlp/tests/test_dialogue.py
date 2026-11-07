@@ -5,9 +5,7 @@ from nlp import dialogue
 
 
 @pytest.mark.parametrize("text", [
-    "hi", "Hello!", "good morning",
-    pytest.param("hey there", marks=pytest.mark.xfail(
-        strict=True, reason="known bug: normalize() strips leading 'hey' as filler, leaving 'there'")),
+    "hi", "Hello!", "good morning", "hey", "hey there", "Hey there!", "hello robot", "yo", "  hey   robot ",
 ])
 def test_greetings(text):
     assert dialogue.respond(text).text == "Hello!"
@@ -41,3 +39,22 @@ def test_commands_phrased_as_questions_are_still_commands():
 
 def test_non_question_gibberish_is_not_a_shrug():
     assert Processor().process("purple monkey dishwasher").source == "none"
+
+
+def test_specific_rule_beats_greeting():
+    assert dialogue.respond("hey robot, how are you").text == "I'm doing well, thanks for asking!"
+    r = Processor().process("hey, did you have a good day")
+    assert r.actions[0].gesture == Shake("yes")
+
+
+def test_greeting_does_not_swallow_commands():
+    from nlp import Home, PickUp, ObjectRef
+
+    assert Processor().process("hey robot go home").actions == [Home()]
+    for t in ["hello, pick up the cup", "hello pick up the cup", "hi robot, pick up the cup", "Hey! Pick up the cup"]:
+        assert Processor().process(t).actions == [PickUp(ObjectRef("cup"))], t
+
+
+def test_words_starting_like_greetings_are_not_greetings():
+    assert dialogue.respond("history lesson") is None and dialogue.respond("hello") is not None
+    assert dialogue.respond("yolo") is None
