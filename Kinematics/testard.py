@@ -269,4 +269,3 @@ def test_planned_moves_stay_inside_joint_limits():
         traj = plan_move(random_valid_q(), random_valid_q(), 60, 300, 0.02)
         for q in traj:
             arm.checkErrorJointLimits(q1=q[0], q2=q[1], q3=q[2])  # must not raise
-
