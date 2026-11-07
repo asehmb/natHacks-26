@@ -1,0 +1,16 @@
+[project]
+name = "natHacks26-nlp"
+version = "0.1.0"
+description = "Lightweight NLP command processor + object grounding for a robot arm"
+requires-python = ">=3.10"
+dependencies = []  # parser and fallback are stdlib-only
+
+[project.optional-dependencies]
+vision = ["numpy", "opencv-python", "onnxruntime", "tokenizers", "huggingface_hub"]
+dev = ["pytest"]
+
+[tool.setuptools]
+packages = ["nlp", "vision"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
