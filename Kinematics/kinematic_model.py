@@ -139,6 +139,107 @@ def in_hull(p, hull):
 
 
 # ------------------------------------------#
+# Trajectory generation                     #
+# ------------------------------------------#
+
+def _per_joint(value, n, name):
+    """Accept one number (applied to every joint) or one number per joint; all must be > 0."""
+    try:
+        values = [float(v) for v in value]
+    except TypeError:
+        values = [float(value)] * n
+    if len(values) != n:
+        raise ValueError('{} must be a single number or have one entry per joint ({})'.format(name, n))
+    if not all(isfinite(v) and v > 0 for v in values):
+        raise ValueError('{} must be finite and greater than zero'.format(name))
+    return values
+
+
+def plan_move(q_start, q_goal, vmax, amax, dt):
+    """
+    --Description--
+    Joint-space trajectory from q_start to q_goal with a trapezoidal velocity profile.
+
+    - ALL joints use the same time profile, so they start and stop together.
+    - The slowest joint (the one that hits its velocity/acceleration limit first)
+      sets the duration. With per-joint limits that joint is the one with the smallest
+      vmax/distance or amax/distance.
+    - Short moves that never reach full speed fall back to a triangular profile.
+    - Samples are exactly dt apart and the last sample is exactly q_goal. The duration
+      is rounded UP to a whole number of dt, which only slows the move (limits stay satisfied).
+
+    The function is unit-agnostic: use degrees with deg/s and deg/s^2, or radians with
+    rad/s and rad/s^2, as long as q_start, q_goal, vmax and amax agree.
+
+    --Parameters--
+    q_start, q_goal -> sequences of joint angles (same length)
+    vmax -> maximum joint speed: one number, or one per joint
+    amax -> maximum joint acceleration: one number, or one per joint
+    dt -> time between samples in seconds (> 0)
+
+    --Returns--
+    list of tuples, one per sample: first = q_start, last = q_goal (exactly).
+    A zero-length move returns [q_start].
+
+    --Note--
+    Straight lines in joint space stay inside the Mk2 joint limits if both ends are
+    inside them: the q1/q2 ranges are boxes and the q3 limits are two lines in (q2, q3),
+    so the allowed region is convex.
+    """
+    q_start = [float(v) for v in q_start]
+    q_goal = [float(v) for v in q_goal]
+    n = len(q_start)
+    if n == 0 or len(q_goal) != n:
+        raise ValueError('q_start and q_goal must be non-empty and the same length')
+    if not all(isfinite(v) for v in q_start + q_goal):
+        raise ValueError('q_start and q_goal must be finite')
+    if not (isfinite(dt) and dt > 0):
+        raise ValueError('dt must be finite and greater than zero')
+    vmax = _per_joint(vmax, n, 'vmax')
+    amax = _per_joint(amax, n, 'amax')
+
+    delta = [g - s for s, g in zip(q_start, q_goal)]
+    moving = [i for i in range(n) if abs(delta[i]) > 1e-12]
+    if not moving:
+        return [tuple(q_start)]  # zero-length move: nothing to divide by
+
+    # Normalised profile s(t): goes 0 -> 1 and joint i follows q_start[i] + s * delta[i].
+    # Joint i then has speed |delta_i| * s' and acceleration |delta_i| * s'', so the
+    # limits turn into limits on s': V = min(vmax_i/|delta_i|), A = min(amax_i/|delta_i|).
+    V = min(vmax[i] / abs(delta[i]) for i in moving)
+    A = min(amax[i] / abs(delta[i]) for i in moving)
+
+    if V * V / A >= 1.0:  # never reaches V: triangular
+        t_acc = sqrt(1.0 / A)
+        t_cruise = 0.0
+        v_peak = A * t_acc
+    else:  # trapezoid
+        t_acc = V / A
+        t_cruise = (1.0 - V * V / A) / V
+        v_peak = V
+    T = 2.0 * t_acc + t_cruise
+
+    steps = max(1, ceil(T / dt))  # round up: samples exactly dt apart
+
+    def s_of(tau):
+        if tau <= t_acc:
+            return 0.5 * A * tau * tau
+        if tau <= t_acc + t_cruise:
+            return 0.5 * A * t_acc * t_acc + v_peak * (tau - t_acc)
+        u = max(T - tau, 0.0)
+        return 1.0 - 0.5 * A * u * u
+
+    # Sample k sits at real time k*dt but at profile time k*T/steps (<= k*dt), i.e. the
+    # profile is stretched slightly, so speeds and accelerations only get smaller.
+    trajectory = [tuple(q_start)]
+    for k in range(1, steps):
+        s = s_of(T * k / steps)
+        trajectory.append(tuple(q_start[i] + s * delta[i] for i in range(n)))
+    trajectory.append(tuple(q_goal))  # exact, no floating point drift
+    return trajectory
+
+
+# ------------------------------------------#
 # Parent class                              #
 # ------------------------------------------#
 
@@ -362,6 +463,66 @@ class EEZYbotARM:
                 return None
 
         return q1, q2, q3
+
+    def workspaceBounds(self, margin_mm=10.0, margin_deg=2.0, samples=81):
+        """
+        --Description--
+        Bounding box of the reachable workspace, found by sampling the joint limits through
+        the forward kinematics IN MEMORY (no files, unlike plot_EEZYbotARM_workspace).
+        Each bound is then shrunk by a safety margin.
+
+        This is a cheap NECESSARY check only: a point outside the box can never be reached,
+        but a point inside it may still be unreachable (the real envelope is not a box).
+        inverseKinematics() is the real check. Pass margin_mm=0, margin_deg=0 for raw bounds.
+
+        --Parameters--
+        margin_mm -> how far to shrink each position bound (mm)
+        margin_deg -> how far to shrink the base-angle bounds (degrees)
+        samples -> grid points per joint (q2 and q3) used for sampling
+
+        --Returns--
+        dict in mm and degrees:
+        r_min, r_max (distance from the base axis), x_min, x_max, y_min, y_max,
+        z_min, z_max (height above the table), q1_min, q1_max (base angle)
+
+        """
+        if samples < 2:
+            raise ValueError('samples must be at least 2')
+
+        # Reach r and height z depend only on q2, q3 (q1 just rotates the arm), so
+        # sample the (q2, q3) region with q1 = 0, where x is the reach.
+        r_vals = []
+        z_vals = []
+        for i in range(samples):
+            q2 = self.q2_min + (self.q2_max - self.q2_min) * i / (samples - 1)
+            q3_lo, q3_hi = self.q3CalcLimits(q2=q2)
+            for j in range(samples):
+                q3 = q3_lo + (q3_hi - q3_lo) * j / (samples - 1)
+                r, _, z = self.forwardKinematics(q1=0, q2=q2, q3=q3)
+                r_vals.append(r)
+                z_vals.append(z)
+
+        r_min, r_max = min(r_vals), max(r_vals)
+        widest = max(abs(self.q1_min), abs(self.q1_max))  # degrees
+
+        raw = {
+            'r_min': r_min,
+            'r_max': r_max,
+            'x_min': r_min * cos(radians(widest)),  # smallest x is at the widest base angle
+            'x_max': r_max,                         # straight ahead
+            'y_min': r_max * sin(radians(self.q1_min)),
+            'y_max': r_max * sin(radians(self.q1_max)),
+            'z_min': min(z_vals),
+            'z_max': max(z_vals),
+            'q1_min': self.q1_min,
+            'q1_max': self.q1_max,
+        }
+
+        bounds = {}
+        for key, value in raw.items():
+            shrink = margin_deg if key.startswith('q1') else margin_mm
+            bounds[key] = value + shrink if key.endswith('_min') else value - shrink
+        return bounds
 
     def plot(self, **kwargs):
         """
