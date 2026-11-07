@@ -202,3 +202,43 @@ def test_very_long_input_is_fast_and_safe():
     r = parse("grab the red screwdriver and " * 2000 + "go home")
     assert time.time() - t < 5
     assert r.actions
+
+
+BOTTLE = ObjectRef("water bottle", "blue")
+
+
+@pytest.mark.parametrize("text", [
+    "grab the water bottle thats blue", "grab the water bottle that's blue", "grab the water bottle that is blue",
+    "grab the water bottle which is blue", "grab the water bottle that looks blue",
+    "grab the blue colored water bottle", "grab the water bottle that is colored blue",
+    "pick up the water bottle that's blue please", "Grab the water bottle THATS blue!",
+])
+def test_relative_clauses_do_not_pollute_the_noun(text):
+    assert parse(text).actions == [PickUp(BOTTLE)]
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("grab the bottle that is on the left", [PickUp(ObjectRef("bottle", position="left"))]),
+    ("grab the bottle thats on the right", [PickUp(ObjectRef("bottle", position="right"))]),
+    ("grab the big cup thats red", [PickUp(ObjectRef("cup", "red", "big"))]),
+    ("put the cup which is red in the box", [PutIn(ObjectRef("box"), ObjectRef("cup", "red"))]),
+    ("put the cup thats red on the tray thats green", [PutIn(ObjectRef("tray", "green"), ObjectRef("cup", "red"), "on")]),
+    ("give me the bottle that looks green", [Give(ObjectRef("bottle", "green"))]),
+    ("hand me the screwdriver thats red", [Give(RED_SD)]),
+    ("grab the red screwdriver thats on the left and give it to me",
+     [PickUp(ObjectRef("screwdriver", "red", position="left")), Give(None)]),
+])
+def test_relative_clauses_in_other_commands(text, expected):
+    assert parse(text).actions == expected
+
+
+def test_real_nouns_survive_relative_word_filtering():
+    # relative words are dropped, but ordinary nouns are untouched
+    assert parse("grab the water bottle").actions == [PickUp(ObjectRef("water bottle"))]
+    assert parse("grab the screwdriver").actions == [PickUp(ObjectRef("screwdriver"))]
+
+
+def test_with_clause_does_not_leak_attributes_or_nouns():
+    # the description after "with" belongs to a different object (the cap), so it must not recolour the bottle
+    assert parse("grab the bottle with the red cap").actions == [PickUp(ObjectRef("bottle"))]
+    assert parse("grab the blue bottle with a handle").actions == [PickUp(ObjectRef("bottle", "blue"))]
