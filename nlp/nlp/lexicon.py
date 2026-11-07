@@ -10,11 +10,17 @@ SHAKE_VERBS = {"shake", "nod", "shrug"}
 HAND_WORDS = {"hand", "claw", "claws", "gripper", "fingers", "grip"}
 
 CONTAINER_PREPS = {"in": "in", "into": "in", "inside": "in", "on": "on", "onto": "on"}
-OBJECT_PREPS = {"on", "at", "from", "near", "next", "by", "of", "in", "inside", "beside"}
+OBJECT_PREPS = {"on", "at", "from", "near", "next", "by", "of", "in", "inside", "beside", "with", "has", "having"}
 
 DETERMINERS = {"the", "that", "this", "those", "these", "a", "an", "my", "your", "some", "me", "to", "over"}
 PRONOUNS = {"it", "them"}
 PLACEHOLDER_NOUNS = {"one", "ones", "thing", "object"}
+# Relative-clause glue ("the bottle that's blue", "the cup which is red", "that looks green"):
+# never part of an object's name.
+RELATIVE_WORDS = {
+    "thats", "that's", "whats", "which", "who", "whose", "is", "are", "was", "looks", "look",
+    "looking", "appears", "colored", "coloured", "color", "colour",
+}
 
 COLORS = {
     "red", "orange", "yellow", "green", "blue", "purple", "pink", "brown",

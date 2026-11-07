@@ -86,7 +86,7 @@ def parse_object(toks: list[str]) -> Optional[ObjectRef]:
             size = size or t
         elif t in L.POSITIONS:
             position = position or t
-        elif t in L.DETERMINERS or t in L.PRONOUNS or t in L.PLACEHOLDER_NOUNS:
+        elif t in L.DETERMINERS or t in L.PRONOUNS or t in L.PLACEHOLDER_NOUNS or t in L.RELATIVE_WORDS:
             continue
         else:
             noun.append(t)
