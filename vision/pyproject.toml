@@ -1,0 +1,15 @@
+[project]
+name = "natHacks26-armvision"
+version = "0.1.0"
+description = "Mat-calibrated vision for the EEZYbot arm: objects, arm tracking and grasp coordinates"
+requires-python = ">=3.10"
+dependencies = ["numpy", "opencv-python>=4.8", "PyYAML"]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.setuptools]
+packages = ["armvision"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
