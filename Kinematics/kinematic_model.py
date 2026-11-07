@@ -10,13 +10,10 @@
 from math import *  # for maths
 import matplotlib.pyplot as plt  # for plotting
 from mpl_toolkits.mplot3d import Axes3D  # for 3D plotting
-# [PUNCH LIST] NEED TO DO SOMETHING ABOUT THIS -> SAME AS ABOVE !
 import mpl_toolkits.mplot3d as a3
 import numpy as np  # for vector arithmetic
 import pathlib  # for dealing with files
-# [PUNCH LIST] needed? -> it's only used to generate a random number, I should be able to delete (pending)
 import scipy as sp
-# [PUNCH LIST] needed for plotting the complex hull -> I think i can do this in another way!
 import pylab as pl
 from scipy.spatial import ConvexHull
 import pickle  # used for saving python files
