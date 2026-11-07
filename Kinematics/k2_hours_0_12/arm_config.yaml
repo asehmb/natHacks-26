@@ -1,0 +1,188 @@
+# EXAMPLE ONLY for unmeasured fields; CAD NOMINAL dimensions are identified below.
+# CAD dimensions come from FX3ZRMVJ1GOY8MN.zip, assuming mm units and 100% scale.
+# Replace every MEASURE ME item before commanding hardware. Validation checks
+# consistency; it does not certify physical travel, linkage geometry, or clearance.
+schema_version: 1
+
+units:
+  length: m
+  angle: rad
+  time: s
+  pulse: us
+
+frame:
+  handedness: right
+  origin: base_rotation_axis_at_table_height
+  x: forward
+  y: left
+  z: up
+
+links:
+  lengths:
+    upper_arm: 0.135  # CAD NOMINAL: shoulder pivot to elbow pivot, meters
+    forearm: 0.147  # CAD NOMINAL: elbow pivot to front tool-mount pivot, meters
+    tool: 0.060  # MEASURE ME: front tool-mount pivot to actual grasp point, meters
+  offsets:
+    shoulder_xyz: [0.0, 0.0, 0.080]  # MEASURE ME: base frame, meters
+    wrist_xyz: [0.0, 0.0, 0.0]  # MEASURE ME: forearm-end frame, meters
+    tool_xyz: [0.0, 0.0, 0.0]  # MEASURE ME: tool frame, meters
+  # Additional measured linkage geometry for K1; meters, pivot-to-pivot.
+  # These describe separate linkage parts, not extra serial arm lengths to add.
+  linkage:
+    straight_link: 0.135  # CAD NOMINAL: EBAmk2_004_link135.STL
+    angled_link: 0.135  # CAD NOMINAL: EBAmk2_005_link135angled.STL
+    long_link: 0.147  # CAD NOMINAL: EBAmk2_008_link147_new.STL
+    forearm_elbow_to_rear_pivot: 0.057  # CAD NOMINAL: EBAmk2_006_horarm__.STL
+    forearm_front_to_rear_pivots: 0.204  # CAD DERIVED: 0.147 + 0.057; not forearm length
+# The lengths above run along each link's local +x at its model zero pose.
+# Offsets are extra translations, not lengths to count a second time.
+# K1 must implement the Mk2 linkage mapping; this file assumes no serial-arm FK.
+
+# Fixed q order for all five functions/arrays: base, shoulder, elbow, wrist, gripper.
+# Joint zero and positive directions must be agreed with K1 during calibration.
+# servo_angle_rad = sign * q_rad + zero_offset
+joints:
+  - name: base
+    sign: 1  # MEASURE ME
+    zero_offset: 1.5707963267948966  # MEASURE ME: radians
+    min: -1.0  # MEASURE ME: radians; deliberately restricted example range
+    max: 1.0  # MEASURE ME
+    max_velocity: 0.3  # MEASURE ME: rad/s
+  - name: shoulder
+    sign: 1  # MEASURE ME
+    zero_offset: 1.5707963267948966  # MEASURE ME
+    min: -0.8  # MEASURE ME
+    max: 0.8  # MEASURE ME
+    max_velocity: 0.3  # MEASURE ME
+  - name: elbow
+    sign: -1  # MEASURE ME
+    zero_offset: 1.5707963267948966  # MEASURE ME
+    min: -0.8  # MEASURE ME
+    max: 0.8  # MEASURE ME
+    max_velocity: 0.3  # MEASURE ME
+  - name: wrist
+    sign: 1  # MEASURE ME
+    zero_offset: 1.5707963267948966  # MEASURE ME
+    min: -0.8  # MEASURE ME
+    max: 0.8  # MEASURE ME
+    max_velocity: 0.3  # MEASURE ME
+  - name: gripper
+    sign: 1  # MEASURE ME
+    zero_offset: 0.0  # MEASURE ME
+    min: 0.0  # MEASURE ME: angular actuator coordinate, not jaw width
+    max: 1.0  # MEASURE ME
+    max_velocity: 0.3  # MEASURE ME
+
+# Five requested actuator slots. Confirm the actual built mechanism has a
+# separate wrist actuator before enabling that slot; this is not a Mk2 DOF claim.
+# angle_at_min/max mean shaft angles AT pulse_min/max, so they may descend.
+# calibration.coefficients = [c0_us, c1_us_per_rad]
+# pulse_us = c0 + c1 * servo_angle_rad (no extra trim or sign applied here).
+# Keep endpoint angles consistent with the fitted coefficients when calibrating.
+servos:
+  base:
+    pulse_min_us: 1000  # MEASURE ME: servo model and safe tested travel
+    pulse_max_us: 2000  # MEASURE ME
+    angle_at_min: 0.0  # MEASURE ME: radians
+    angle_at_max: 3.141592653589793  # MEASURE ME
+    calibration:
+      coefficients: [1000.0, 318.3098861837907]  # MEASURE ME
+  shoulder:
+    pulse_min_us: 1000  # MEASURE ME
+    pulse_max_us: 2000  # MEASURE ME
+    angle_at_min: 0.0  # MEASURE ME
+    angle_at_max: 3.141592653589793  # MEASURE ME
+    calibration:
+      coefficients: [1000.0, 318.3098861837907]  # MEASURE ME
+  elbow:
+    pulse_min_us: 1000  # MEASURE ME
+    pulse_max_us: 2000  # MEASURE ME
+    angle_at_min: 0.0  # MEASURE ME
+    angle_at_max: 3.141592653589793  # MEASURE ME
+    calibration:
+      coefficients: [1000.0, 318.3098861837907]  # MEASURE ME
+  wrist:
+    pulse_min_us: 1000  # MEASURE ME
+    pulse_max_us: 2000  # MEASURE ME
+    angle_at_min: 0.0  # MEASURE ME
+    angle_at_max: 3.141592653589793  # MEASURE ME
+    calibration:
+      coefficients: [1000.0, 318.3098861837907]  # MEASURE ME
+  gripper:
+    pulse_min_us: 1000  # MEASURE ME
+    pulse_max_us: 2000  # MEASURE ME
+    angle_at_min: 0.0  # MEASURE ME
+    angle_at_max: 3.141592653589793  # MEASURE ME
+    calibration:
+      coefficients: [1000.0, 318.3098861837907]  # MEASURE ME
+
+gripper:
+  open_pulse_us: 1000  # MEASURE ME: also inside the gripper joint's mapped range
+  closed_pulse_us: 1300  # MEASURE ME: direction may differ on your claw
+
+# Bounding box is only an outer filter, not an IK/collision feasibility test.
+workspace:
+  x: {min: 0.05, max: 0.25}  # MEASURE ME: meters
+  y: {min: -0.20, max: 0.20}  # MEASURE ME
+  z: {min: 0.00, max: 0.25}  # MEASURE ME
+
+camera:
+  # null explicitly means uncalibrated. Replace with a 3x3 pinhole K matrix.
+  intrinsics: null  # MEASURE ME: [[fx, 0, cx], [0, fy, cy], [0, 0, 1]]
+  # p_base = T_base_cam @ p_cam; translation in meters; homogeneous columns.
+  # OpenCV camera axes: x right, y down, z forward. Identity is ONLY a placeholder.
+  T_base_cam:  # MEASURE ME: camera-to-base rigid transform
+    - [1.0, 0.0, 0.0, 0.0]
+    - [0.0, 1.0, 0.0, 0.0]
+    - [0.0, 0.0, 1.0, 0.0]
+    - [0.0, 0.0, 0.0, 1.0]
+  # [x, y, 1] ~ table_homography @ [u, v, 1]; x,y in base-frame meters, z=0.
+  # Applies to the exact image resolution/orientation used during calibration.
+  # Identity is ONLY a placeholder; do not use it for picks.
+  table_homography:  # MEASURE ME
+    - [1.0, 0.0, 0.0]
+    - [0.0, 1.0, 0.0]
+    - [0.0, 0.0, 1.0]
+  resolution: [1920, 1080]  # MEASURE ME: actual stream [width, height] in pixels
+
+safety:
+  max_speed: 0.3  # MEASURE ME: global joint-speed cap, rad/s (not tool m/s)
+# Effective per-joint velocity cap = min(joint.max_velocity, safety.max_speed).
+# Firmware must independently enforce its own limits; this file sends no commands.
+
+# K2 hours 0-12 RGB segmentation options. These are starting thresholds, not
+# calibrated values. OpenCV HSV uses H=0..179 and S,V=0..255 for uint8 images.
+vision:
+  min_area_px: 300  # MEASURE ME: tune for block size in the actual image
+  hsv_ranges:
+    red:  # MEASURE ME: red wraps around the hue boundary; keep both bands
+      - [[0, 100, 70], [10, 255, 255]]
+      - [[170, 100, 70], [179, 255, 255]]
+    green:  # MEASURE ME: optional starting threshold
+      - [[35, 80, 50], [85, 255, 255]]
+    blue:  # MEASURE ME: optional starting threshold
+      - [[95, 100, 50], [130, 255, 255]]
+
+# Provenance for the CAD dimensions only. This is not physical calibration.
+cad_measurements:
+  source_archive: FX3ZRMVJ1GOY8MN.zip
+  method: circle_fit_to_pivot_holes_then_center_distance
+  source_coordinate_unit: mm  # STL itself has no mandatory embedded units
+  assumed_print_scale: 1.0  # 100%; verify the team's slicer settings
+  physical_calibration_verified: false
+  source_files:
+    upper_arm: EBAmk2_002_mainarm.STL
+    forearm: EBAmk2_006_horarm__.STL
+    straight_link: EBAmk2_004_link135.STL
+    angled_link: EBAmk2_005_link135angled.STL
+    long_link: EBAmk2_008_link147_new.STL
+    forearm_elbow_to_rear_pivot: EBAmk2_006_horarm__.STL
+  still_requires_measurement:
+    - links.lengths.tool
+    - links.offsets
+    - joints
+    - servos
+    - gripper
+    - workspace
+    - camera
+    - safety.max_speed
