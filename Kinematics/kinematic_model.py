@@ -136,6 +136,107 @@ def in_hull(p, hull):
 
 
 # ------------------------------------------#
+# Trajectory generation                     #
+# ------------------------------------------#
+
+def _per_joint(value, n, name):
+    """Accept one number (applied to every joint) or one number per joint; all must be > 0."""
+    try:
+        values = [float(v) for v in value]
+    except TypeError:
+        values = [float(value)] * n
+    if len(values) != n:
+        raise ValueError('{} must be a single number or have one entry per joint ({})'.format(name, n))
+    if not all(isfinite(v) and v > 0 for v in values):
+        raise ValueError('{} must be finite and greater than zero'.format(name))
+    return values
+
+
+def plan_move(q_start, q_goal, vmax, amax, dt):
+    """
+    --Description--
+    Joint-space trajectory from q_start to q_goal with a trapezoidal velocity profile.
+
+    - ALL joints use the same time profile, so they start and stop together.
+    - The slowest joint (the one that hits its velocity/acceleration limit first)
+      sets the duration. With per-joint limits that joint is the one with the smallest
+      vmax/distance or amax/distance.
+    - Short moves that never reach full speed fall back to a triangular profile.
+    - Samples are exactly dt apart and the last sample is exactly q_goal. The duration
+      is rounded UP to a whole number of dt, which only slows the move (limits stay satisfied).
+
+    The function is unit-agnostic: use degrees with deg/s and deg/s^2, or radians with
+    rad/s and rad/s^2, as long as q_start, q_goal, vmax and amax agree.
+
+    --Parameters--
+    q_start, q_goal -> sequences of joint angles (same length)
+    vmax -> maximum joint speed: one number, or one per joint
+    amax -> maximum joint acceleration: one number, or one per joint
+    dt -> time between samples in seconds (> 0)
+
+    --Returns--
+    list of tuples, one per sample: first = q_start, last = q_goal (exactly).
+    A zero-length move returns [q_start].
+
+    --Note--
+    Straight lines in joint space stay inside the Mk2 joint limits if both ends are
+    inside them: the q1/q2 ranges are boxes and the q3 limits are two lines in (q2, q3),
+    so the allowed region is convex.
+    """
+    q_start = [float(v) for v in q_start]
+    q_goal = [float(v) for v in q_goal]
+    n = len(q_start)
+    if n == 0 or len(q_goal) != n:
+        raise ValueError('q_start and q_goal must be non-empty and the same length')
+    if not all(isfinite(v) for v in q_start + q_goal):
+        raise ValueError('q_start and q_goal must be finite')
+    if not (isfinite(dt) and dt > 0):
+        raise ValueError('dt must be finite and greater than zero')
+    vmax = _per_joint(vmax, n, 'vmax')
+    amax = _per_joint(amax, n, 'amax')
+
+    delta = [g - s for s, g in zip(q_start, q_goal)]
+    moving = [i for i in range(n) if abs(delta[i]) > 1e-12]
+    if not moving:
+        return [tuple(q_start)]  # zero-length move: nothing to divide by
+
+    # Normalised profile s(t): goes 0 -> 1 and joint i follows q_start[i] + s * delta[i].
+    # Joint i then has speed |delta_i| * s' and acceleration |delta_i| * s'', so the
+    # limits turn into limits on s': V = min(vmax_i/|delta_i|), A = min(amax_i/|delta_i|).
+    V = min(vmax[i] / abs(delta[i]) for i in moving)
+    A = min(amax[i] / abs(delta[i]) for i in moving)
+
+    if V * V / A >= 1.0:  # never reaches V: triangular
+        t_acc = sqrt(1.0 / A)
+        t_cruise = 0.0
+        v_peak = A * t_acc
+    else:  # trapezoid
+        t_acc = V / A
+        t_cruise = (1.0 - V * V / A) / V
+        v_peak = V
+    T = 2.0 * t_acc + t_cruise
+
+    steps = max(1, ceil(T / dt))  # round up: samples exactly dt apart
+
+    def s_of(tau):
+        if tau <= t_acc:
+            return 0.5 * A * tau * tau
+        if tau <= t_acc + t_cruise:
+            return 0.5 * A * t_acc * t_acc + v_peak * (tau - t_acc)
+        u = max(T - tau, 0.0)
+        return 1.0 - 0.5 * A * u * u
+
+    # Sample k sits at real time k*dt but at profile time k*T/steps (<= k*dt), i.e. the
+    # profile is stretched slightly, so speeds and accelerations only get smaller.
+    trajectory = [tuple(q_start)]
+    for k in range(1, steps):
+        s = s_of(T * k / steps)
+        trajectory.append(tuple(q_start[i] + s * delta[i] for i in range(n)))
+    trajectory.append(tuple(q_goal))  # exact, no floating point drift
+    return trajectory
+
+
+# ------------------------------------------#
 # Parent class                              #
 # ------------------------------------------#
 
@@ -159,7 +260,9 @@ class EEZYbotARM:
     """
 
     # Class attribute
-    # e.g. species = 'mammal'
+    # IK rejects targets where |cos(elbow angle)| exceeds this (singularity margin).
+    # 0.99 keeps the elbow at least ~8 degrees from fully straight / fully folded.
+    ik_cos_margin = 0.99
 
     # Initializer / Instance attributes
     def __init__(self, initial_q1, initial_q2, initial_q3):
@@ -216,16 +319,19 @@ class EEZYbotARM:
         # Find angle limits
         q3_min, q3_max = self.q3CalcLimits(q2=q2)
 
+        # Small tolerance (degrees) absorbs floating point error exactly at a limit
+        tol = 1e-9
+
         # Check given angles are within limits, else raise exception
-        if q1 < self.q1_min or q1 > self.q1_max:
+        if q1 < self.q1_min - tol or q1 > self.q1_max + tol:
             raise Exception('Value for q1 is outside joint limits. Joint limits in degrees are ({},{})'.format(
                 self.q1_min, self.q1_max))
 
-        if q2 < self.q2_min or q2 > self.q2_max:
+        if q2 < self.q2_min - tol or q2 > self.q2_max + tol:
             raise Exception('Value for q2 is outside joint limits. Joint limits in degrees are ({},{})'.format(
                 self.q2_min, self.q2_max))
 
-        if q3 < q3_min or q3 > q3_max:
+        if q3 < q3_min - tol or q3 > q3_max + tol:
             raise Exception(
                 'Value for q3 is outside joint limits. Joint limits in degrees are ({},{})'.format(q3_min, q3_max))
 
@@ -271,86 +377,149 @@ class EEZYbotARM:
         L4 = self.L4
 
         # Find the position of the end effector using the forward kinematics equations
-        x_EE = round((cos(q1) * (cos(q2+q3)*L3 + cos(q2)*L2))+(L4*cos(q1)), 3)
-        y_EE = round((sin(q1) * (cos(q2+q3)*L3 + cos(q2)*L2))+(L4*sin(q1)), 3)
-        z_EE = round((L1 + sin(q2)*L2 + sin(q2+q3)*L3), 3)
+        x_EE = (cos(q1) * (cos(q2+q3)*L3 + cos(q2)*L2)) + (L4*cos(q1))
+        y_EE = (sin(q1) * (cos(q2+q3)*L3 + cos(q2)*L2)) + (L4*sin(q1))
+        z_EE = L1 + sin(q2)*L2 + sin(q2+q3)*L3
 
         # Return the end effector position in (mm)
         return x_EE, y_EE, z_EE
 
-    def inverseKinematics(self, x_EE, y_EE, z_EE):
+    def inverseKinematics(self, x_EE, y_EE, z_EE, check_limits=True):
         """
         --Description--
-        Function: to find the Inverse Kinematics for the EEZYbotARM Mk2 
+        Function: to find the Inverse Kinematics for the EEZYbotARM Mk2
 
-        Description: given x y z positions of the desired EE position inside the
-        manipulator workspace, find the corresponding joint angles
+        Given x y z positions of the desired EE position (mm, world frame), find
+        the corresponding joint angles. Elbow-up solution only (the q3 joint
+        limits only allow q3 < 0, so the solution never flips).
+
+        Returns None (never raises) when the target is unreachable, too close to
+        the elbow singularity (see ik_cos_margin), or needs joint angles outside
+        the joint limits.
 
         --Parameters--
-        x_EE, y_EE, z_EE -> the cartesian position of the end effector in the world frame
+        x_EE, y_EE, z_EE -> the cartesian position of the end effector in the world frame (mm)
+        check_limits -> if False, skip the joint-limit check (maths only)
 
         --Returns--
-        q1, q2, q3 -> Corresponding joint angles in degrees
+        (q1, q2, q3) -> joint angles in degrees (full precision, not rounded), or None
 
         """
-        # DH parameters (Proximal Convention)
         L1 = self.L1
         L2 = self.L2
         L3 = self.L3
         L4 = self.L4
 
-        # Find the value for the fist angle
+        # Reject NaN / inf inputs
+        if not all(isfinite(v) for v in (x_EE, y_EE, z_EE)):
+            return None
+
+        # Find the value for the first angle
         q1 = atan2(y_EE, x_EE)
 
-        # Find the values for the position of joint #4 for x, y, z
-        x_4 = x_EE - (L4 * cos(q1))
-        y_4 = y_EE - (L4 * sin(q1))
-        z_4 = z_EE
+        # Position of joint #4 (the wrist) in the vertical plane of the arm.
+        # The L4 offset is fixed and radial (the gripper stays level), so it is
+        # subtracted from the radial distance. This distance is SIGNED: it goes
+        # negative when the target is closer to the base axis than L4 (the old
+        # sqrt() version lost that sign and returned wrong angles).
+        xy_4 = hypot(x_EE, y_EE) - L4
+        z_1_4 = z_EE - L1  # height of joint #4 above joint #1
 
-        # Find the length of the third side of the (virtual) triangle made by L2,
-        # L3 in the vertical plane of the robot arm
+        # Squared length of the virtual side made by L2 and L3
+        v_side_sq = xy_4**2 + z_1_4**2
 
-        # --- Specify the z poisition of joint #1
-        z_1 = L1
+        # Law of cosines for the elbow angle. If the cosine is outside +/- ik_cos_margin
+        # the target is out of reach or too close to a straight/folded singularity.
+        cos_elbow = (L2**2 + L3**2 - v_side_sq) / (2 * L2 * L3)
+        if abs(cos_elbow) > self.ik_cos_margin:
+            return None
+        cos_elbow = max(-1.0, min(1.0, cos_elbow))  # rounding safety
 
-        # --- First we find the z distance between joint #1 and joint #4 (in the world frame)
-        z_1_4 = z_4 - z_1
+        # Angle at joint #3 (elbow up)
+        q3 = -(pi - acos(cos_elbow))
 
-        # --- Find the true distance (in x, y plane) to joint #4
-        xy_4 = sqrt((x_4**2)+(y_4**2))
-
-        # --- Then we find the length of the virtual side made by the right angle triangle
-        v_side = sqrt((z_1_4**2) + (xy_4**2))
-
-        # Find the value for the angle at joint #3
-        q3 = - (pi - acos((L2**2 + L3**2 - v_side**2)/(2 * L2 * L3)))
-
-        # Find the value for the angle at joint #2 %DEBUG HERE
-        # --- Find the value of the angle from the x-y plane to the virtual side
+        # Angle at joint #2: angle of the virtual side above horizontal, plus the
+        # angle between the virtual side and L2. The sum is always correct for the
+        # elbow-up convention, so no sign switching is needed.
+        v_side = sqrt(v_side_sq)  # > 0 because of the margin check above
         q2_a = atan2(z_1_4, xy_4)
+        cos_b = (v_side_sq + L2**2 - L3**2) / (2 * v_side * L2)
+        q2_b = acos(max(-1.0, min(1.0, cos_b)))
+        q2 = q2_a + q2_b
 
-        q2_b = acos((v_side**2 + L2**2 - L3**2)/(2 * v_side * L2))
+        # Convert to degrees (no rounding: round only when displaying)
+        q1 = q1 * 180/pi
+        q2 = q2 * 180/pi
+        q3 = q3 * 180/pi
 
-        q2 = q2_a + q2_b  # NOTE there's some more work to do here to make this correctly summation or subtraction dependant on the position of the arm!
-
-        # Print the input world frame position of the end effector
-        print('Input Position of End Effector: \n')
-        print('x_EE: {}'.format(x_EE))
-        print('y_EE: {}'.format(y_EE))
-        print('z_EE: {} \n'.format(z_EE))
-
-        # Print the output joint angles
-        print('Ouput joint angles: \n')
-        print('q1: {:+.2f}'.format(q1 * 180/pi))
-        print('q2: {:+.2f}'.format(q2 * 180/pi))
-        print('q3: {:+.2f} \n'.format(q3 * 180/pi))
-
-        # round values
-        q1 = round(q1 * 180/pi, 2)
-        q2 = round(q2 * 180/pi, 2)
-        q3 = round(q3 * 180/pi, 2)
+        # Reject solutions outside the joint limits
+        if check_limits:
+            try:
+                self.checkErrorJointLimits(q1=q1, q2=q2, q3=q3)
+            except Exception:
+                return None
 
         return q1, q2, q3
+
+    def workspaceBounds(self, margin_mm=10.0, margin_deg=2.0, samples=81):
+        """
+        --Description--
+        Bounding box of the reachable workspace, found by sampling the joint limits through
+        the forward kinematics IN MEMORY (no files, unlike plot_EEZYbotARM_workspace).
+        Each bound is then shrunk by a safety margin.
+
+        This is a cheap NECESSARY check only: a point outside the box can never be reached,
+        but a point inside it may still be unreachable (the real envelope is not a box).
+        inverseKinematics() is the real check. Pass margin_mm=0, margin_deg=0 for raw bounds.
+
+        --Parameters--
+        margin_mm -> how far to shrink each position bound (mm)
+        margin_deg -> how far to shrink the base-angle bounds (degrees)
+        samples -> grid points per joint (q2 and q3) used for sampling
+
+        --Returns--
+        dict in mm and degrees:
+        r_min, r_max (distance from the base axis), x_min, x_max, y_min, y_max,
+        z_min, z_max (height above the table), q1_min, q1_max (base angle)
+
+        """
+        if samples < 2:
+            raise ValueError('samples must be at least 2')
+
+        # Reach r and height z depend only on q2, q3 (q1 just rotates the arm), so
+        # sample the (q2, q3) region with q1 = 0, where x is the reach.
+        r_vals = []
+        z_vals = []
+        for i in range(samples):
+            q2 = self.q2_min + (self.q2_max - self.q2_min) * i / (samples - 1)
+            q3_lo, q3_hi = self.q3CalcLimits(q2=q2)
+            for j in range(samples):
+                q3 = q3_lo + (q3_hi - q3_lo) * j / (samples - 1)
+                r, _, z = self.forwardKinematics(q1=0, q2=q2, q3=q3)
+                r_vals.append(r)
+                z_vals.append(z)
+
+        r_min, r_max = min(r_vals), max(r_vals)
+        widest = max(abs(self.q1_min), abs(self.q1_max))  # degrees
+
+        raw = {
+            'r_min': r_min,
+            'r_max': r_max,
+            'x_min': r_min * cos(radians(widest)),  # smallest x is at the widest base angle
+            'x_max': r_max,                         # straight ahead
+            'y_min': r_max * sin(radians(self.q1_min)),
+            'y_max': r_max * sin(radians(self.q1_max)),
+            'z_min': min(z_vals),
+            'z_max': max(z_vals),
+            'q1_min': self.q1_min,
+            'q1_max': self.q1_max,
+        }
+
+        bounds = {}
+        for key, value in raw.items():
+            shrink = margin_deg if key.startswith('q1') else margin_mm
+            bounds[key] = value + shrink if key.endswith('_min') else value - shrink
+        return bounds
 
     def plot(self, **kwargs):
         """
