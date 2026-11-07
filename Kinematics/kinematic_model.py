@@ -1,4 +1,3 @@
-
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
 # Program Title: kinematic_model.py
 # Program Purpose: Define EEZYbotARM_kinematics parent class and EEZYbotARM_Mk2 child class
