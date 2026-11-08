@@ -237,6 +237,46 @@ def plan_move(q_start, q_goal, vmax, amax, dt):
 
 
 # ------------------------------------------#
+# Straight-line waypoints                   #
+# ------------------------------------------#
+
+def line_points(p_start, p_goal, step):
+    """
+    --Description--
+    Evenly spaced waypoints along the straight line from p_start to p_goal (Cartesian space).
+
+    A joint-space move between two poses curves through space, so vertical moves such as
+    descend and lift must be split into small waypoints instead. Unit-agnostic: p_start,
+    p_goal and step must use the same length unit (mm in this file, metres in kinematics.py).
+
+    --Parameters--
+    p_start, p_goal -> (x, y, z)
+    step -> maximum distance between neighbouring waypoints (> 0)
+
+    --Returns--
+    list of (x, y, z) tuples. The first is p_start, the last is exactly p_goal, and the
+    spacing is even and never larger than step. If p_start == p_goal: [p_start].
+
+    """
+    p0 = [float(v) for v in p_start]
+    p1 = [float(v) for v in p_goal]
+    if len(p0) != 3 or len(p1) != 3:
+        raise ValueError('p_start and p_goal must be (x, y, z)')
+    if not all(isfinite(v) for v in p0 + p1):
+        raise ValueError('p_start and p_goal must be finite')
+    if not (isfinite(step) and step > 0):
+        raise ValueError('step must be finite and greater than zero')
+
+    length = sqrt(sum((b - a) ** 2 for a, b in zip(p0, p1)))
+    if length == 0.0:
+        return [tuple(p0)]
+    n = max(1, ceil(length / step))
+    points = [tuple(a + (b - a) * k / n for a, b in zip(p0, p1)) for k in range(n)]
+    points.append(tuple(p1))  # exact goal, no floating point drift
+    return points
+
+
+# ------------------------------------------#
 # Parent class                              #
 # ------------------------------------------#
 
@@ -460,6 +500,46 @@ class EEZYbotARM:
                 return None
 
         return q1, q2, q3
+
+    def is_reachable(self, x_EE, y_EE, z_EE):
+        """
+        --Description--
+        True only if inverseKinematics accepts the target: inside the reach, away from the
+        elbow singularity and inside the joint limits. This is the authoritative check
+        (workspaceBounds() is only a quick reject).
+
+        --Parameters--
+        x_EE, y_EE, z_EE -> target position of the end effector in the world frame (mm)
+
+        """
+        return self.inverseKinematics(x_EE, y_EE, z_EE) is not None
+
+    def cartesianLine(self, p_start, p_goal, step_mm=5.0):
+        """
+        --Description--
+        Joint angles for a STRAIGHT LINE in Cartesian space from p_start to p_goal.
+
+        The line is split into waypoints at most step_mm apart (see line_points) and
+        inverseKinematics is run on every one. Use this for vertical descend / lift moves,
+        where a straight joint-space move would arc through the object or the table.
+
+        --Parameters--
+        p_start, p_goal -> (x, y, z) in the world frame (mm)
+        step_mm -> maximum waypoint spacing (mm)
+
+        --Returns--
+        list of (q1, q2, q3) in degrees, one per waypoint (first = p_start, last = p_goal),
+        or None if ANY waypoint is unreachable, so a half-valid line is never returned.
+        Raises ValueError for malformed points or a bad step.
+
+        """
+        joints = []
+        for point in line_points(p_start, p_goal, step_mm):
+            q = self.inverseKinematics(*point)
+            if q is None:
+                return None
+            joints.append(q)
+        return joints
 
     def workspaceBounds(self, margin_mm=10.0, margin_deg=2.0, samples=81):
         """
@@ -1437,9 +1517,3 @@ class EEZYbotARM_Mk1(EEZYbotARM):
 
         return servoAngle_q1, servoAngle_q2, servoAngle_q3
 
-
-# # ------------------------------------------#
-# # Function for plotting robot arm
-# # ------------------------------------------#
-
-# class plot_EEZYbotARM(robot_arm):

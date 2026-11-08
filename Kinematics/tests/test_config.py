@@ -4,7 +4,7 @@ import math
 import numpy as np
 import pytest
 
-from config import (
+from Kinematics.config import (
     ConfigError, DEFAULT_PATH, JOINT_NAMES, get_T_base_cam, get_joint_limits,
     load_config, save_config, validate_config,
 )

@@ -3,7 +3,7 @@ import json
 import numpy as np
 import pytest
 
-from config import load_config
+from Kinematics.config import load_config
 from Kinematics.mock_arm import MockArm
 
 

@@ -13,6 +13,7 @@ Public interface
     plan_move(q0, q1, vmax, amax, dt) -> list of joint tuples (rad), all joints finish together
     line_points(p0, p1, step_m) -> waypoints (m) along a straight line
     cartesian_line(p0, p1, step_m) -> joint tuples (rad) for a straight line, or None
+    joint_positions(q)       joints (rad) -> 5 points (m): base, shoulder, elbow, wrist, tip
 
 Frame: right-handed, origin on the base axis at table height, x forward, y left, z up.
 Joint angles are the geometric joint angles of kinematic_model (q1 base yaw,
@@ -195,3 +196,21 @@ def cartesian_line(p_start: Sequence[float], p_goal: Sequence[float], step_m: fl
             return None
         joints.append(q)
     return joints
+
+
+# ---------------------------------------------------------------- drawing helper
+
+
+def joint_positions(q: Sequence[float]) -> List[Vec3]:
+    """Joint angles (rad) -> 3D points (m) of base, shoulder, elbow, wrist and tip.
+
+    For drawing the arm. The last point equals fk(q): the gripper stays level, so the
+    tip is the wrist plus L4 straight outward along the arm's vertical plane.
+    """
+    q1, q2, q3 = q
+    L1, L2, L3, L4 = (v / _MM_PER_M for v in (_ARM.L1, _ARM.L2, _ARM.L3, _ARM.L4))
+    elbow_r, elbow_z = L2 * math.cos(q2), L1 + L2 * math.sin(q2)
+    wrist_r, wrist_z = elbow_r + L3 * math.cos(q2 + q3), elbow_z + L3 * math.sin(q2 + q3)
+    planar = [(0.0, 0.0), (0.0, L1), (elbow_r, elbow_z), (wrist_r, wrist_z), (wrist_r + L4, wrist_z)]
+    c, s = math.cos(q1), math.sin(q1)
+    return [(r * c, r * s, z) for r, z in planar]
