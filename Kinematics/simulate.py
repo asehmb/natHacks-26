@@ -89,6 +89,30 @@ class TraceRecorder:
         self.samples.append(Sample(self._arm.now(), q, fk(q), self._label, self._holding,
                                    self._arm.gripper_value()))
 
+    def wait_for_gripper(self, timeout_s: float = 10.0, check_stop=None) -> None:
+        m = self._arm._map
+        cmd = self._arm.gripper_command
+        target = m.gripper_open if cmd == "open" else m.gripper_close
+        tick = getattr(self._arm, "_tick", 0.01)
+        waited = 0.0
+        while waited < timeout_s - 1e-9:
+            curr = self._arm.gripper_value()
+            if target is not None and curr is not None and abs(curr - target) <= 1e-3:
+                return
+            if check_stop is not None:
+                check_stop()
+            dt = min(tick, timeout_s - waited)
+            self.wait(dt)
+            waited += dt
+        curr = self._arm.gripper_value()
+        if target is not None and (curr is None or abs(curr - target) > 1e-3):
+            curr_str = f"{curr:.3f}" if curr is not None else "unknown"
+            from mock_adapter import ArmError
+            raise ArmError(
+                f"gripper did not reach {cmd} target ({target:.3f} rad) "
+                f"within {timeout_s:.1f} s (current: {curr_str} rad)"
+            )
+
     def __getattr__(self, name):                      # everything else goes straight to the arm
         return getattr(self._arm, name)
 

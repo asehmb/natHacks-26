@@ -14,6 +14,7 @@ Public interface
     line_points(p0, p1, step_m) -> waypoints (m) along a straight line
     cartesian_line(p0, p1, step_m) -> joint tuples (rad) for a straight line, or None
     joint_positions(q)       joints (rad) -> 5 points (m): base, shoulder, elbow, wrist, tip
+    configure_arm(config)    reconfigure model link lengths from arm_config.yaml or dict
 
 Frame: right-handed, origin on the base axis at table height, x forward, y left, z up.
 Joint angles are the geometric joint angles of kinematic_model (q1 base yaw,
@@ -25,6 +26,14 @@ from __future__ import annotations
 import math
 from typing import List, Optional, Sequence, Tuple
 
+try:
+    from Kinematics.config import load_config
+except ImportError:
+    try:
+        from config import load_config
+    except ImportError:
+        load_config = None
+
 from kinematic_model import EEZYbotARM_Mk2, line_points, plan_move as _plan_move
 
 Vec3 = Tuple[float, float, float]
@@ -34,6 +43,46 @@ _MM_PER_M = 1000.0
 # One model instance. Only its constants and pure functions are used; its stored
 # q1/q2/q3 state is never touched.
 _ARM = EEZYbotARM_Mk2(0, 80, -90)
+
+
+def configure_arm(config: Optional[dict] = None) -> None:
+    """Update model link dimensions from arm_config.yaml or a passed dict.
+
+    Maps:
+      links.offsets.shoulder_xyz[2] -> L1 (base height to shoulder pivot, mm)
+      links.lengths.upper_arm       -> L2 (main arm length, mm)
+      links.lengths.forearm         -> L3 (horarm length, mm)
+      links.lengths.tool            -> L4 (tool/gripper radial offset, mm)
+    """
+    global _ARM, _RAW_CACHE
+    if config is None and load_config is not None:
+        try:
+            config = load_config()
+        except Exception:
+            return
+    if not isinstance(config, dict):
+        return
+
+    try:
+        links = config.get("links", {})
+        lengths = links.get("lengths", {})
+        offsets = links.get("offsets", {})
+        shoulder_xyz = offsets.get("shoulder_xyz")
+        if shoulder_xyz is not None and len(shoulder_xyz) >= 3 and shoulder_xyz[2] is not None:
+            _ARM.L1 = float(shoulder_xyz[2]) * _MM_PER_M
+        if "upper_arm" in lengths and lengths["upper_arm"] is not None:
+            _ARM.L2 = float(lengths["upper_arm"]) * _MM_PER_M
+        if "forearm" in lengths and lengths["forearm"] is not None:
+            _ARM.L3 = float(lengths["forearm"]) * _MM_PER_M
+        if "tool" in lengths and lengths["tool"] is not None:
+            _ARM.L4 = float(lengths["tool"]) * _MM_PER_M
+        _RAW_CACHE = None  # invalidate bounds cache
+    except Exception:
+        pass
+
+
+# Initialize with geometry from arm_config.yaml
+configure_arm()
 
 # Servo range used to reject out-of-range servo angles. Confirm against the real servos.
 SERVO_MIN_DEG = 0.0

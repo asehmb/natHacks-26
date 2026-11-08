@@ -9,7 +9,11 @@ import math
 
 import numpy as np
 
-from config import JOINT_NAMES, get_joint_limits, load_config
+try:
+    from Kinematics.config import JOINT_NAMES, get_joint_limits, load_config
+except ImportError:
+    from config import JOINT_NAMES, get_joint_limits, load_config
+
 
 
 class MockArm:

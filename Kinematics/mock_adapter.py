@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Optional, Protocol, Sequence, Tuple
+from typing import Callable, Optional, Protocol, Sequence, Tuple
 
 Vec3 = Tuple[float, float, float]
 
@@ -51,23 +51,31 @@ class ArmInterface(Protocol):
     def speed_limits(self) -> Optional[Tuple[float, float, float]]:
         """Per-joint speed caps (rad/s) for q1, q2, q3, or None if unknown."""
 
+    def wait_for_gripper(self, timeout_s: float = 10.0) -> None:
+        """Advance time until the gripper reaches target, or raise ArmError."""
+
 
 @dataclass(frozen=True)
 class JointMap:
-    """How our joints map onto the mock's five. DEFAULTS ARE ASSUMPTIONS: confirm with K2."""
+    """How our joints map onto the mock's five.
+
+    Default offsets align K1's geometric angles (where shoulder/elbow are ~1.43 rad
+    and ~-2.02 rad) with the standard centered joint limits [-0.8, 0.8] in arm_config.yaml.
+    """
 
     arm_indices: Tuple[int, int, int] = (0, 1, 2)       # mock joints for q1, q2, q3
     signs: Tuple[float, float, float] = (1.0, 1.0, 1.0)  # +1 or -1 per joint
-    offsets: Tuple[float, float, float] = (0.0, 0.0, 0.0)  # radians, added after the sign
+    offsets: Tuple[float, float, float] = (0.0, -1.43345, 2.02065)  # radians, added after the sign
     gripper_index: Optional[int] = 4                    # None if the mock has no gripper joint
-    gripper_open: Optional[float] = None                # mock value when open (rad)
-    gripper_close: Optional[float] = None               # mock value when closed (rad)
+    gripper_open: Optional[float] = 1.0                 # mock value when open (rad)
+    gripper_close: Optional[float] = 0.0                # mock value when closed (rad)
 
     def __post_init__(self):
         if len(set(self.arm_indices)) != 3:
             raise ValueError("arm_indices must be three different joint indices")
         if any(s not in (1.0, -1.0) for s in self.signs):
             raise ValueError("signs must be +1 or -1")
+
 
 
 class MockArmAdapter:
@@ -146,6 +154,65 @@ class MockArmAdapter:
         """Current gripper joint value (mock radians), or None if not mapped."""
         idx = self._map.gripper_index
         return None if idx is None else float(self._mock.get_state()["q"][idx])
+
+    def gripper_travel_time(self, state: Optional[str] = None) -> float:
+        """Estimated or exact time in seconds for the gripper to travel to state."""
+        m = self._map
+        if m.gripper_index is None:
+            return 0.0
+        state = state or self._gripper_cmd
+        if state is None:
+            return 0.0
+        target = m.gripper_open if state == "open" else m.gripper_close
+        if target is None:
+            return 0.0
+        current = self.gripper_value()
+        if current is None:
+            return 0.0
+        velocity = getattr(self._mock, "_velocity", None)
+        if velocity is not None and m.gripper_index < len(velocity):
+            v = float(velocity[m.gripper_index])
+            if v > 0:
+                return abs(target - current) / v
+        return 0.0
+
+    def wait_for_gripper(
+        self,
+        timeout_s: float = 10.0,
+        tol: float = 1e-3,
+        check_stop: Optional[Callable[[], None]] = None,
+    ) -> None:
+        """Advance time until the gripper reaches its commanded target.
+
+        Raises ArmError if the target is not reached within timeout_s seconds.
+        """
+        m = self._map
+        if m.gripper_index is None:
+            return
+        if self._gripper_cmd is None:
+            return
+        target = m.gripper_open if self._gripper_cmd == "open" else m.gripper_close
+        if target is None:
+            return
+
+        waited = 0.0
+        while waited < timeout_s - 1e-9:
+            curr = self.gripper_value()
+            if curr is not None and abs(curr - target) <= tol:
+                return
+            if check_stop is not None:
+                check_stop()
+            step = min(self._tick, timeout_s - waited)
+            self.wait(step)
+            waited += step
+
+        curr = self.gripper_value()
+        if curr is None or abs(curr - target) > tol:
+            curr_str = f"{curr:.3f}" if curr is not None else "unknown"
+            raise ArmError(
+                f"gripper did not reach {self._gripper_cmd} target ({target:.3f} rad) "
+                f"within {timeout_s:.1f} s (current: {curr_str} rad)"
+            )
 
     @property
     def gripper_command(self) -> Optional[str]:

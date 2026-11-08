@@ -194,6 +194,24 @@ class Planner:
             if s.gripper is not None:
                 self.arm.set_gripper(s.gripper)
                 self._emit(self.state, i, total, f"gripper {s.gripper}", s.xyz)
+                if hasattr(self.arm, "wait_for_gripper"):
+                    try:
+                        self.arm.wait_for_gripper(self.cfg.arrive_timeout_s, check_stop=self._check_stop)
+                    except TypeError:
+                        self.arm.wait_for_gripper(self.cfg.arrive_timeout_s)
+                elif hasattr(self.arm, "gripper_travel_time"):
+                    travel = self.arm.gripper_travel_time(s.gripper)
+                    if travel > self.cfg.arrive_timeout_s:
+                        raise PlannerError(
+                            f"gripper travel time {travel:.2f} s exceeds timeout {self.cfg.arrive_timeout_s} s"
+                        )
+                    step = getattr(self.arm, "_tick", self.cfg.dt)
+                    waited = 0.0
+                    while waited < travel - 1e-12:
+                        self._check_stop()
+                        dt_step = min(step, travel - waited)
+                        self.arm.wait(dt_step)
+                        waited += dt_step
             if s.dwell_s > 0:
                 self.arm.wait(s.dwell_s)
 
