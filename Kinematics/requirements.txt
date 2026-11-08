@@ -3,3 +3,6 @@ opencv-python>=4.8,<5
 ruamel.yaml>=0.18,<0.19
 PyYAML>=6,<7
 pytest>=8,<10
+matplotlib>=3.7
+scipy>=1.10
+
