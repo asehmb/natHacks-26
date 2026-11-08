@@ -21,10 +21,28 @@ import sys
 from dataclasses import dataclass
 from typing import List, Optional, Sequence, Tuple
 
-from kinematics import fk, joint_positions
-from mock_adapter import JointMap, MockArmAdapter
-from pick_place import SequenceError
+from kinematics import fk
+from mock_adapter import ArmError, JointMap, MockArmAdapter
+from pick_place import DEFAULT_CONFIG, SequenceError
 from planner import Event, Planner, PlannerError, State
+
+try:
+    from kinematics import joint_positions
+except ImportError:  # kinematics.py does not provide it: draw the links from the same geometry as fk()
+    def joint_positions(q: Sequence[float]):
+        """Base, shoulder, elbow, wrist, tip positions (meters) for joints q (rad)."""
+        from kinematic_model import EEZYbotARM_Mk2 as _M
+        l1, l2, l3, l4 = (v / 1000.0 for v in (_M.L1, _M.L2, _M.L3, _M.L4))
+        q1, q2, q3 = q
+        c1, s1 = math.cos(q1), math.sin(q1)
+        r_elbow = l2 * math.cos(q2)
+        z_elbow = l1 + l2 * math.sin(q2)
+        r_wrist = r_elbow + l3 * math.cos(q2 + q3)
+        z_wrist = z_elbow + l3 * math.sin(q2 + q3)
+        return [(0.0, 0.0, 0.0), (0.0, 0.0, l1),
+                (r_elbow * c1, r_elbow * s1, z_elbow),
+                (r_wrist * c1, r_wrist * s1, z_wrist),
+                (r_wrist * c1 + l4 * c1, r_wrist * s1 + l4 * s1, z_wrist)]
 
 Vec3 = Tuple[float, float, float]
 
@@ -78,8 +96,84 @@ class TraceRecorder:
 # --------------------------------------------------------------------- running
 
 
-def build_arm(joint_map: JointMap = JOINT_MAP) -> MockArmAdapter:
-    """K2's MockArm wrapped in the adapter. Fills in demo gripper values from the config limits."""
+_AXIS_NAMES = ("q1 base", "q2 shoulder", "q3 elbow")
+_TOL = 1e-6
+
+
+def task_q_ranges(task: str, targets: Sequence[Vec3]) -> List[Tuple[float, float]]:
+    """(min, max) of each of OUR joint angles (rad) over every pose this task visits, home included.
+
+    Building the sequence also rejects unreachable targets (SequenceError) before anything runs.
+    """
+    from kinematics import ik
+    from pick_place import move_sequence, pick_and_place_sequence
+
+    cfg = DEFAULT_CONFIG
+    if task == "goto":
+        steps = move_sequence(targets[0], cfg, from_xyz=cfg.home)
+    else:
+        steps = pick_and_place_sequence(targets[0], targets[1], cfg)
+    poses = [cfg.home] + [s.xyz for s in steps]
+    solutions = []
+    for p in poses:
+        q = ik(*p)
+        if q is None:
+            raise PlannerError(f"IK has no solution for {p}")
+        solutions.append(q)
+    return [(min(q[k] for q in solutions), max(q[k] for q in solutions)) for k in range(3)]
+
+
+def fit_axis(need: Tuple[float, float], limit: Tuple[float, float]) -> Tuple[float, float, bool]:
+    """Pick (sign, offset, shifted) so that sign * q + offset keeps [need] inside [limit].
+
+    Tries the plain mapping, then a flipped sign, then (keeping sign +1) shifts the needed range to the
+    middle of the limit range. Raises ValueError if the limit range is too narrow for the motion.
+    """
+    (a, b), (lo, hi) = need, limit
+    for sign in (1.0, -1.0):
+        m0, m1 = sorted((sign * a, sign * b))
+        if m0 >= lo - _TOL and m1 <= hi + _TOL:
+            return sign, 0.0, False
+    if b - a > hi - lo + _TOL:
+        raise ValueError(f"motion spans {b - a:.3f} rad but the configured limits only span {hi - lo:.3f} rad")
+    return 1.0, (lo + hi) / 2.0 - (a + b) / 2.0, True
+
+
+def fit_joint_map(joint_map: JointMap, limits, need: Sequence[Tuple[float, float]]) -> JointMap:
+    """Return joint_map with signs / offsets chosen so the task fits inside the config's joint limits.
+
+    The simulator only uses this mapping for the mock's limit checks, so any consistent mapping that fits
+    gives the same animation. For real hardware the mapping must come from the calibration, not from here.
+    """
+    signs, offsets, notes, shifted = [], [], [], False
+    for k, idx in enumerate(joint_map.arm_indices):
+        lo, hi = float(limits[idx][0]), float(limits[idx][1])
+        try:
+            sign, offset, moved = fit_axis(need[k], (lo, hi))
+        except ValueError as exc:
+            raise ValueError(f"{_AXIS_NAMES[k]} -> mock joint {idx}: {exc}. Needed range "
+                             f"[{need[k][0]:.3f}, {need[k][1]:.3f}] rad, config range [{lo:.3f}, {hi:.3f}] rad. "
+                             "Check joints[] min/max in arm_config.yaml.") from exc
+        signs.append(sign)
+        offsets.append(offset)
+        shifted = shifted or moved
+        notes.append(f"  {_AXIS_NAMES[k]:<12} -> mock joint {idx}: needs [{need[k][0]:+.3f}, {need[k][1]:+.3f}] rad, "
+                     f"config allows [{lo:+.3f}, {hi:+.3f}] rad -> sign {sign:+.0f}, offset {offset:+.3f}")
+    print("Joint map for the simulation:" + ("  (shifted to fit the config limits)" if shifted else ""))
+    print("\n".join(notes))
+    if shifted:
+        print("  NOTE: the config's elbow/shoulder zero differs from kinematic_model's angles. Fine for the\n"
+              "  simulation; confirm the real zero and sign with K2 before driving hardware.")
+    return JointMap(joint_map.arm_indices, tuple(signs), tuple(offsets), joint_map.gripper_index,
+                    joint_map.gripper_open, joint_map.gripper_close)
+
+
+def build_arm(joint_map: JointMap = JOINT_MAP,
+              need: Optional[Sequence[Tuple[float, float]]] = None) -> MockArmAdapter:
+    """K2's MockArm wrapped in the adapter. Fills in demo gripper values from the config limits.
+
+    need: (min, max) of q1, q2, q3 the task will use. If given, the joint map is fitted to the config limits.
+    """
     try:
         from config import get_joint_limits, load_config
         from mock_arm import MockArm
@@ -88,9 +182,12 @@ def build_arm(joint_map: JointMap = JOINT_MAP) -> MockArmAdapter:
                  "this file, or fix the import names at the top of build_arm().")
     config = load_config()
     mock = MockArm(config)
+    limits = get_joint_limits(config)
+    if need is not None:
+        joint_map = fit_joint_map(joint_map, limits, need)
     g = joint_map.gripper_index
     if g is not None and (joint_map.gripper_open is None or joint_map.gripper_close is None):
-        lo, hi = get_joint_limits(config)[g]
+        lo, hi = limits[g]
         joint_map = JointMap(joint_map.arm_indices, joint_map.signs, joint_map.offsets, g,
                              hi if joint_map.gripper_open is None else joint_map.gripper_open,
                              lo if joint_map.gripper_close is None else joint_map.gripper_close)
@@ -99,7 +196,7 @@ def build_arm(joint_map: JointMap = JOINT_MAP) -> MockArmAdapter:
 
 def run(task: str, targets: Sequence[Vec3], joint_map: JointMap = JOINT_MAP):
     """Run 'goto' (one target) or 'pick_place' (object, destination). Returns (recorder, planner)."""
-    arm = build_arm(joint_map)
+    arm = build_arm(joint_map, task_q_ranges(task, targets))
     recorder = TraceRecorder(arm)
     planner = Planner(recorder, on_event=recorder.on_event)
     planner.go_home()
@@ -214,7 +311,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     try:
         recorder, planner = run(task, targets)
-    except (SequenceError, PlannerError, ValueError) as exc:
+    except (SequenceError, PlannerError, ArmError, ValueError) as exc:
         print(f"REJECTED: {exc}")
         print("The arm did not execute the sequence.")
         return 1
