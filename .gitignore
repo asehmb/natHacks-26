@@ -4,3 +4,4 @@ __pycache__/
 *.egg-info/
 models/
 *.DS_Store
+logs/*.jsonl

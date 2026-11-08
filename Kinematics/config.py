@@ -11,8 +11,26 @@ import tempfile
 import os
 
 import numpy as np
-from ruamel.yaml import YAML
-from ruamel.yaml.error import YAMLError
+try:
+    from ruamel.yaml import YAML
+    from ruamel.yaml.error import YAMLError
+except ImportError:
+    import yaml
+    YAMLError = yaml.YAMLError
+
+    class YAML:
+        def __init__(self, typ=None):
+            self.preserve_quotes = True
+            self.allow_duplicate_keys = False
+
+        def indent(self, mapping=2, sequence=4, offset=2):
+            pass
+
+        def load(self, stream):
+            return yaml.safe_load(stream)
+
+        def dump(self, data, stream):
+            yaml.dump(data, stream, sort_keys=False)
 
 DEFAULT_PATH = Path(__file__).with_name("arm_config.yaml")
 JOINT_NAMES = ("base", "shoulder", "elbow", "wrist", "gripper")

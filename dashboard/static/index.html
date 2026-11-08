@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>natHacks '26 Robotic Sorting Arm | Mission Control & Telemetry</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="app-container">
+    
+    <!-- TOP HEADER -->
+    <header class="top-nav">
+      <div class="nav-brand">
+        <div class="pulse-indicator online"></div>
+        <div>
+          <h1>NATHACKS '26 SORTING ARM</h1>
+          <p class="subtitle">AUTONOMOUS SORTING CONTROL & SAFETY TELEMETRY</p>
+        </div>
+      </div>
+
+      <div class="nav-status-group">
+        <!-- Mode Switcher -->
+        <div class="mode-toggle-box">
+          <span class="mode-label">PICK MODE:</span>
+          <button id="btn-mode-toggle" class="mode-pill camera-active" title="Toggle between Open-Loop and Camera-Guided">
+            <span class="pill-dot"></span>
+            <span id="active-mode-text">CAMERA-GUIDED</span>
+          </button>
+        </div>
+
+        <!-- Link State -->
+        <div class="status-pill link-pill">
+          <span class="status-title">LINK:</span>
+          <span id="link-state" class="status-val live">SIMULATED (ONLINE)</span>
+        </div>
+
+        <!-- Watchdog State -->
+        <div class="status-pill watchdog-pill">
+          <span class="status-title">WATCHDOG:</span>
+          <span id="watchdog-state" class="status-val safe">HEALTHY (1850ms)</span>
+        </div>
+
+        <!-- E-STOP BUTTON -->
+        <div class="estop-container">
+          <button id="btn-stop" class="btn-estop" title="Software emergency halt. The physical kill switch remains the real safety.">
+            <span class="estop-icon">🛑</span> STOP
+          </button>
+          <button id="btn-reset" class="btn-reset-safety" title="Reset safety error and restore ready state">
+            RESET
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- SAFETY BANNER (Visible when rejected or stopped) -->
+    <div id="safety-banner" class="safety-banner hidden">
+      <div class="banner-icon">⚠️</div>
+      <div class="banner-content">
+        <span class="banner-title" id="safety-banner-title">SAFETY LAYER ACTIVE</span>
+        <span class="banner-msg" id="safety-banner-msg">No safety breaches detected.</span>
+      </div>
+      <div class="banner-notice">Notice: Physical kill switch remains primary hardware safety.</div>
+    </div>
+
+    <!-- MAIN GRID DASHBOARD -->
+    <main class="dashboard-grid">
+
+      <!-- COLUMN 1: COMMAND & SAFETY REVIEW -->
+      <section class="panel command-panel">
+        <div class="panel-header">
+          <h2>COMMAND INPUT & SAFETY REVIEW</h2>
+          <span class="header-badge">NLP & KINEMATICS</span>
+        </div>
+
+        <div class="command-input-container">
+          <form id="command-form" onsubmit="event.preventDefault(); sendCommand();">
+            <div class="input-wrapper">
+              <input type="text" id="cmd-input" placeholder="Type plain English command, e.g. 'Pick up the red cube'..." autocomplete="off">
+              <button type="submit" id="btn-submit-cmd" class="btn-primary">DISPATCH</button>
+            </div>
+          </form>
+
+          <!-- Quick Command Presets -->
+          <div class="preset-pills">
+            <span class="preset-label">Demo presets:</span>
+            <button class="pill" onclick="setCommand('Pick up the red cube and put it in the blue bin')">Pick Red Cube</button>
+            <button class="pill" onclick="setCommand('Home the arm')">Home</button>
+            <button class="pill" onclick="setCommand('Open hand')">Open Gripper</button>
+            <button class="pill" onclick="setCommand('Close hand')">Close Gripper</button>
+            <button class="pill pill-danger" onclick="setCommand('Move to 0.45 0.20 0.10')" title="Demonstrate safety rejection for out-of-reach coordinates">Unsafe Reach (Demo Reject)</button>
+            <button class="pill pill-warn" onclick="setCommand('Pick up the object')" title="Demonstrate ambiguity clarification prompt">Ambiguous Target</button>
+          </div>
+        </div>
+
+        <!-- Command Result & Safety Status -->
+        <div class="command-status-card" id="command-status-card">
+          <div class="status-header">
+            <span class="label">INTERPRETATION STATUS:</span>
+            <span id="cmd-status-badge" class="badge-status badge-ready">READY</span>
+          </div>
+
+          <!-- Rejection / Clarification Message Box -->
+          <div id="cmd-feedback-box" class="feedback-box hidden">
+            <div class="feedback-icon" id="feedback-icon">ℹ️</div>
+            <div class="feedback-text" id="feedback-text">Ready for command.</div>
+          </div>
+
+          <!-- Parsed JSON Viewer -->
+          <div class="json-viewer-box">
+            <div class="json-header">
+              <span>PARSED ACTION JSON</span>
+              <button class="btn-copy-json" onclick="copyJson()">COPY JSON</button>
+            </div>
+            <pre id="json-display" class="json-display">{\n  "status": "awaiting_command"\n}</pre>
+          </div>
+        </div>
+      </section>
+
+      <!-- COLUMN 2: LIVE WEBCAM & TARGETING -->
+      <section class="panel vision-panel">
+        <div class="panel-header">
+          <h2>LIVE VISION & OBJECT DETECTION</h2>
+          <div class="vision-controls">
+            <select id="camera-source-select" onchange="toggleCameraSource(this.value)">
+              <option value="simulated">Simulated Inspection Bench</option>
+              <option value="webcam">Live Browser Webcam</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="camera-viewport-wrapper">
+          <!-- Video element for real browser webcam -->
+          <video id="webcam-video" autoplay playsinline muted class="camera-layer hidden"></video>
+
+          <!-- Fallback image stream for simulated bench -->
+          <img id="simulated-feed" src="/api/vision/frame.jpg" alt="Bench View" class="camera-layer">
+
+          <!-- Interactive Bounding Box & Target Overlay Canvas -->
+          <canvas id="vision-canvas" class="vision-overlay" width="640" height="480"></canvas>
+
+          <!-- HUD Watermark -->
+          <div class="camera-hud">
+            <div class="hud-item"><span class="hud-key">SRC:</span> <span id="hud-source">SIMULATED BENCH</span></div>
+            <div class="hud-item"><span class="hud-key">FPS:</span> <span id="hud-fps">30.0</span></div>
+            <div class="hud-item"><span class="hud-key">DETECTED:</span> <span id="hud-count">4 OBJECTS</span></div>
+            <div class="hud-item hud-target"><span class="hud-key">TARGET:</span> <span id="hud-target-name">RED CUBE</span></div>
+          </div>
+        </div>
+
+        <!-- Detected Objects Selector -->
+        <div class="detected-targets-list">
+          <span class="list-title">DETECTED OBJECTS (CLICK TO TARGET):</span>
+          <div id="targets-chips-container" class="chips-container">
+            <!-- Dynamically populated -->
+          </div>
+        </div>
+      </section>
+
+      <!-- COLUMN 3: ARM STATUS & KINEMATICS -->
+      <section class="panel arm-panel">
+        <div class="panel-header">
+          <h2>ARM STATUS & REAL-TIME KINEMATICS</h2>
+          <span id="packet-counter-badge" class="header-badge packet-badge">PKT #1042</span>
+        </div>
+
+        <!-- Task Step Phase Pipeline -->
+        <div class="task-step-pipeline">
+          <div class="pipeline-title">CURRENT TASK STEP: <span id="current-step-label" class="step-label-active">IDLE</span></div>
+          <div class="steps-trail">
+            <div class="trail-node" data-step="PLANNING">PLAN</div>
+            <div class="trail-node" data-step="HOMING">HOME</div>
+            <div class="trail-node" data-step="HOVER">HOVER</div>
+            <div class="trail-node" data-step="DESCEND">DESCEND</div>
+            <div class="trail-node" data-step="GRASP">GRASP</div>
+            <div class="trail-node" data-step="LIFT">LIFT</div>
+            <div class="trail-node" data-step="PLACE">PLACE</div>
+            <div class="trail-node" data-step="RETRACT">RETRACT</div>
+            <div class="trail-node active" data-step="IDLE">IDLE</div>
+          </div>
+          <div class="step-description" id="step-description">System ready for commands</div>
+        </div>
+
+        <!-- Joint Positions Gauges -->
+        <div class="joints-grid">
+          <div class="joint-card">
+            <div class="joint-name">BASE (J0)</div>
+            <div class="joint-val" id="val-base">90.0°</div>
+            <div class="joint-rad" id="rad-base">(0.00 rad)</div>
+            <div class="gauge-bar"><div class="gauge-fill" id="gauge-base" style="width: 50%;"></div></div>
+          </div>
+
+          <div class="joint-card">
+            <div class="joint-name">SHOULDER (J1)</div>
+            <div class="joint-val" id="val-shoulder">90.0°</div>
+            <div class="joint-rad" id="rad-shoulder">(0.00 rad)</div>
+            <div class="gauge-bar"><div class="gauge-fill" id="gauge-shoulder" style="width: 50%;"></div></div>
+          </div>
+
+          <div class="joint-card">
+            <div class="joint-name">ELBOW (J2)</div>
+            <div class="joint-val" id="val-elbow">90.0°</div>
+            <div class="joint-rad" id="rad-elbow">(0.00 rad)</div>
+            <div class="gauge-bar"><div class="gauge-fill" id="gauge-elbow" style="width: 50%;"></div></div>
+          </div>
+
+          <div class="joint-card">
+            <div class="joint-name">WRIST (J3)</div>
+            <div class="joint-val" id="val-wrist">90.0°</div>
+            <div class="joint-rad" id="rad-wrist">(0.00 rad)</div>
+            <div class="gauge-bar"><div class="gauge-fill" id="gauge-wrist" style="width: 50%;"></div></div>
+          </div>
+
+          <div class="joint-card joint-gripper">
+            <div class="joint-name">GRIPPER (J4)</div>
+            <div class="joint-val" id="val-gripper">90.0°</div>
+            <div class="joint-rad" id="rad-gripper">OPEN</div>
+            <div class="gauge-bar"><div class="gauge-fill gripper-fill" id="gauge-gripper" style="width: 50%;"></div></div>
+          </div>
+        </div>
+
+        <!-- Arm Schematic / 2D Pose Vector Preview -->
+        <div class="arm-schematic-box">
+          <canvas id="arm-schematic-canvas" width="340" height="130"></canvas>
+        </div>
+      </section>
+
+      <!-- ROW 2: PRODUCTION METRICS & TELEMETRY -->
+      <section class="panel metrics-panel">
+        <div class="panel-header">
+          <h2>PRODUCTION METRICS & SENSORS</h2>
+          <div class="metrics-actions">
+            <button class="btn-secondary" onclick="exportJsonl()">EXPORT JSONL LOG</button>
+            <button class="btn-secondary" onclick="openDocsModal()">EVENT BUS API</button>
+          </div>
+        </div>
+
+        <div class="metrics-cards-row">
+          <div class="stat-card">
+            <div class="stat-title">PARTS SORTED</div>
+            <div class="stat-value text-accent" id="stat-sorted">14</div>
+            <div class="stat-sub">Valid placed objects</div>
+          </div>
+
+          <div class="stat-card">
+            <div class="stat-title">REJECTS</div>
+            <div class="stat-value text-danger" id="stat-rejects">2</div>
+            <div class="stat-sub">Safety / pick failures</div>
+          </div>
+
+          <div class="stat-card">
+            <div class="stat-title">SUCCESS RATE</div>
+            <div class="stat-value text-success" id="stat-success-rate">87.5%</div>
+            <div class="stat-sub">Sorted / Total attempts</div>
+          </div>
+
+          <div class="stat-card">
+            <div class="stat-title">AVG CYCLE TIME</div>
+            <div class="stat-value" id="stat-cycle-time">4.08s</div>
+            <div class="stat-sub">Last: <span id="stat-last-cycle">4.10s</span></div>
+          </div>
+
+          <!-- Stretch 2: INA219 Power Card -->
+          <div class="stat-card ina219-card">
+            <div class="stat-title">INA219 CURRENT DRAW</div>
+            <div class="stat-value text-warning" id="ina-current">85.0 mA</div>
+            <div class="stat-sub">Volt: <span id="ina-volt">5.04V</span> | Pwr: <span id="ina-power">428 mW</span></div>
+          </div>
+        </div>
+
+        <!-- Stretch 1: Open-Loop vs Camera-Guided Table -->
+        <div class="stretch-table-wrapper">
+          <div class="table-title">BENCHMARK: OPEN-LOOP VS CAMERA-GUIDED ACCURACY</div>
+          <table class="benchmark-table">
+            <thead>
+              <tr>
+                <th>OPERATING MODE</th>
+                <th>ATTEMPTS</th>
+                <th>SUCCESSFUL</th>
+                <th>REJECTS / MISSES</th>
+                <th>PICK ACCURACY</th>
+                <th>AVG CYCLE TIME</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr id="row-open-loop">
+                <td><span class="mode-tag tag-open">OPEN-LOOP (BLIND)</span></td>
+                <td id="ol-attempts">12</td>
+                <td id="ol-success">8</td>
+                <td id="ol-rejects">4</td>
+                <td id="ol-accuracy">66.7%</td>
+                <td id="ol-cycle">4.50s</td>
+              </tr>
+              <tr id="row-camera-guided" class="highlight-row">
+                <td><span class="mode-tag tag-cam">CAMERA-GUIDED (VISION)</span></td>
+                <td id="cg-attempts">18</td>
+                <td id="cg-success">17</td>
+                <td id="cg-rejects">1</td>
+                <td id="cg-accuracy">94.4%</td>
+                <td id="cg-cycle">4.10s</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ROW 3: TIMESTAMPED EVENT LOG -->
+      <section class="panel event-log-panel">
+        <div class="panel-header">
+          <h2>TIMESTAMPED SYSTEM EVENT LOG</h2>
+          <div class="log-filter-group">
+            <button class="filter-btn active" data-filter="ALL" onclick="filterLogs('ALL')">ALL</button>
+            <button class="filter-btn filter-danger" data-filter="REJECTIONS" onclick="filterLogs('REJECTIONS')">REJECTIONS</button>
+            <button class="filter-btn" data-filter="safety:" onclick="filterLogs('safety:')">SAFETY</button>
+            <button class="filter-btn" data-filter="arm:" onclick="filterLogs('arm:')">ARM</button>
+            <button class="filter-btn" data-filter="nlp:" onclick="filterLogs('nlp:')">NLP</button>
+            <button class="filter-btn" data-filter="vision:" onclick="filterLogs('vision:')">VISION</button>
+          </div>
+        </div>
+
+        <div class="event-log-container" id="event-log-container">
+          <div class="event-stream" id="event-stream">
+            <!-- Event entries injected dynamically -->
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- EVENT BUS API DOCUMENTATION MODAL -->
+    <div id="docs-modal" class="modal-overlay hidden" onclick="if(event.target===this) closeDocsModal();">
+      <div class="modal-dialog">
+        <div class="modal-header">
+          <h3>SHARED EMIT(EVENT, PAYLOAD) BUS INTERFACE</h3>
+          <button class="btn-close" onclick="closeDocsModal()">✕</button>
+        </div>
+        <div class="modal-body">
+          <p>Any team can publish data to the dashboard in real time using the shared event bus:</p>
+          
+          <div class="code-block-header">Python (Kinematics, NLP, Vision, Host)</div>
+          <pre class="code-block">from dashboard.events import emit
+
+# 1. NLP Command & Parsing
+emit("nlp:command_received", {"text": "pick up red cube"})
+emit("nlp:parsed", {"actions": [...], "status": "accepted"})
+
+# 2. Arm & Kinematics Steps
+emit("planner:step_changed", {"step": "GRASP", "index": 5, "total": 9, "message": "Closing gripper claws"})
+emit("arm:packet_sent", {"counter": 1043, "cmd": "MOVE", "targets": [90, 110, 105, 90, 75]})
+
+# 3. Safety Enforcement
+emit("safety:rejected", {"reason": "Target outside workspace reach radius"})
+emit("safety:estop", {"triggered_by": "operator", "reason": "Stop button commanded"})
+
+# 4. Vision Detections
+emit("vision:detection_frame", {"count": 4, "detections": [...]})
+
+# 5. Sensors & Production
+emit("sensors:ina219_read", {"current_ma": 420.5, "voltage_v": 4.96})
+emit("stats:production_update", {"parts_sorted": 15, "rejects": 2})</pre>
+
+          <div class="code-block-header">HTTP REST / C / Firmware / Curl</div>
+          <pre class="code-block">curl -X POST http://localhost:8000/api/emit \
+  -H "Content-Type: application/json" \
+  -d '{"event": "arm:packet_ack", "payload": {"counter": 1043, "accepted": true}}'</pre>
+
+          <div class="doc-events-table">
+            <h4>Documented Event Names:</h4>
+            <ul>
+              <li><code>nlp:command_received</code>: Operator natural language input</li>
+              <li><code>nlp:parsed</code>: Parsed action list & acceptance status</li>
+              <li><code>nlp:clarification_needed</code>: Ambiguity detection & questions</li>
+              <li><code>safety:rejected</code>: Rejection with explicit failure reason</li>
+              <li><code>safety:estop</code>: Emergency stop triggered</li>
+              <li><code>safety:reset</code>: System re-armed and reset to safe ready</li>
+              <li><code>planner:step_changed</code>: Active trajectory phase update</li>
+              <li><code>arm:status_update</code>: 5-DOF joint angles & comms state</li>
+              <li><code>arm:packet_sent</code> / <code>arm:packet_ack</code>: Armlink protocol packets</li>
+              <li><code>vision:detection_frame</code>: Detected objects & bounding boxes</li>
+              <li><code>sensors:ina219_read</code>: Current, voltage, & power draw</li>
+              <li><code>stats:production_update</code>: Sorted, rejects, and cycle time</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
