@@ -4,7 +4,7 @@
 Packet-only test: python3 firmware/comms/send_ik.py --dry-run --angles 90 85 100 90
 Hardware: python3 firmware/comms/send_ik.py --port /dev/cu.usbserial-10 --angles 90 85 100 90 --send-motion
 Requires pyserial only for hardware mode. The ESP32 must implement HELLO and receive
-OPEN_SESSION, ARM, MOVE, HEARTBEAT; writing bytes does not guarantee acceptance.
+OPEN_SESSION, ARM, MOVE, HEARTBEAT and return authenticated ACKs.
 """
 import argparse
 import hashlib
@@ -122,9 +122,81 @@ def wait_hello(ser, deadline_seconds=5.0):
 
 def send(ser, kind, session, counter, payload=b''):
     frame = cobs_encode(packet(kind, session, counter, payload))
-    ser.write(frame)
+    if ser.write(frame) != len(frame):
+        raise OSError('Incomplete serial write')
     ser.flush()
     print(f'TX kind=0x{kind:02x} counter={counter} bytes={len(frame)}')
+
+
+def verify_ack(raw, session, counter, command):
+    """Verify the checkpoint-2 OPEN ACK or checkpoint-3 command ACK."""
+    size = 3 if command == OPEN_SESSION else 4
+    if len(raw) != HEADER.size + size + 32:
+        raise ValueError('ACK length mismatch')
+    expected = (b'AR', 1, 1, 0x80, size, session, counter)
+    if HEADER.unpack(raw[:HEADER.size]) != expected:
+        raise ValueError('ACK header/session/counter mismatch')
+    if not hmac.compare_digest(raw[-32:], hmac.digest(KEY, raw[:-32], 'sha256')):
+        raise ValueError('ACK HMAC invalid')
+    payload = raw[HEADER.size:-32]
+    if payload[0] != command:
+        raise ValueError('ACK command mismatch')
+    if size == 4 and payload[3] != 0:
+        raise ValueError(f'Receiver rejected command 0x{command:02x}, result={payload[3]}')
+    expected_armed = 0 if command in (OPEN_SESSION, STOP) else 1
+    if payload[1:3] != bytes([1, expected_armed]):
+        raise ValueError('ACK active/armed flags mismatch')
+
+
+def send_and_wait_ack(ser, kind, session, counter, payload=b'', ack_timeout=0.3):
+    send(ser, kind, session, counter, payload)
+    deadline = time.monotonic() + ack_timeout
+    pending = bytearray()
+    while time.monotonic() < deadline:
+        byte = ser.read(1)
+        if not byte:
+            continue
+        if byte != b'\x00':
+            pending.extend(byte)
+            if len(pending) > 256:
+                raise ValueError('Oversized ACK frame')
+            continue
+        if not pending:  # Receiver's leading delimiters are permitted.
+            continue
+        raw = cobs_decode(bytes(pending) + byte)
+        pending.clear()
+        # A queued, authenticated HELLO from the same session may precede ACK.
+        if len(raw) >= 5 and raw[4] == HELLO:
+            if unpack_authenticated_hello(raw) != session:
+                raise ValueError('Receiver session changed while awaiting ACK')
+            continue
+        verify_ack(raw, session, counter, kind)
+        print(f'RX authenticated ACK command=0x{kind:02x} counter={counter}')
+        return
+    raise TimeoutError(f'ACK timeout command=0x{kind:02x} counter={counter}; sequence aborted')
+
+
+def send_sequence(ser, session, targets, hold_seconds=1.0, ack_timeout=0.3):
+    """One-shot motion test. Every command gates the next on an accepted ACK.
+
+    On failure send nothing further; never retry ambiguous motion commands.
+    The receiver watchdog then applies its agreed timeout policy.
+    """
+    counter = 0
+
+    def exchange(kind, payload=b''):
+        nonlocal counter
+        counter += 1
+        send_and_wait_ack(ser, kind, session, counter, payload, ack_timeout)
+
+    exchange(OPEN_SESSION)
+    exchange(ARM)
+    exchange(MOVE, targets)
+    end = time.monotonic() + hold_seconds
+    while time.monotonic() < end:
+        exchange(HEARTBEAT)
+        time.sleep(0.1)
+    exchange(STOP)
 
 
 def main():
@@ -157,23 +229,11 @@ def main():
         # Opening USB serial may reset the ESP32; HELLO must come from the actual receiver.
         session = wait_hello(ser)
         print('RX valid HELLO. Session:', session.hex())
-        send(ser, OPEN_SESSION, session, 1)
-        # Protocol timeout is 500ms. Receiver should acknowledge before we proceed;
-        # existing firmware does not specify ACK payload, so ask teammate to verify it.
-        send(ser, ARM, session, 2)
-        send(ser, MOVE, session, 3, targets)
-        # Keep watchdog alive briefly, then STOP. This is a one-shot integration test,
-        # not a trajectory streaming controller.
-        counter = 4
-        end = time.monotonic() + 1.0
         try:
-            while time.monotonic() < end:
-                send(ser, HEARTBEAT, session, counter)
-                counter += 1
-                time.sleep(0.1)
-        finally:
-            send(ser, STOP, session, counter)
-    print('Transmitted packet sequence. Check ESP32 receiver logs/ACKs for acceptance.')
+            send_sequence(ser, session, targets)
+        except (OSError, ValueError, TimeoutError) as error:
+            raise SystemExit(f'FAIL: {error}. No further commands sent; receiver watchdog handles timeout.')
+    print('PASS: all commands acknowledged; receiver confirmed STOP/disarmed.')
 
 
 if __name__ == '__main__':

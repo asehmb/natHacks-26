@@ -124,3 +124,21 @@ int poll_byte() {
     client.state(False, (92, 86, 101, 91), 2)
     assert lib.mock_writes() == writes
     print('PASS: 3B sketch dispatch reaches mock writes/detach; timeout holds attachment and targets')
+    # Exercise the production sender against the actual mocked C++ receiver.
+    from send_ik import send_sequence, payload_for_angles
+    time.sleep(0.55)
+    lib.poll_byte()
+    serial = Serial()
+    # This mock serial has read(), while the original HELLO utility uses read_until().
+    from test_combined import frames
+    from send_ik import unpack_authenticated_hello
+    for raw in frames(serial, 1):
+        try:
+            session = unpack_authenticated_hello(raw)
+            break
+        except ValueError:
+            continue
+    else:
+        raise AssertionError('No simulated HELLO for production sender')
+    send_sequence(serial, session, payload_for_angles([90, 85, 100, 90]), hold_seconds=0.2)
+    print('PASS: production sender verified all ACKs from mocked combined firmware')
