@@ -155,9 +155,11 @@ mechanical limits, and rate limiting. The arm is not assembled; individual
 unloaded-servo testing can proceed under F1 without waiting for final arm
 kinematic limits. The limits copied into this test are not final calibration.
 
-F2's remaining protocol work includes ACK-aware host sending, heartbeat/failure
-handling, and additional physical rejection/reconnect tests. These are follow-up
-tasks, not completed claims or prerequisites to committing these test artifacts.
+ACK-aware host sending and continuous heartbeat/failure handling have since
+been implemented and tested on the laptop; see ACK_SENDER.md. F2's remaining
+protocol work includes physical verification of those sender changes and
+additional physical rejection/reconnect tests. These do not change the recorded
+3A hardware result or imply a physical pass for the updated host lifecycle.
 The physical servo backend has not been implemented or enabled. Joint testing
 with F1 follows when their backend is ready, including physical STOP-detach and
 timeout-hold verification. No further servo implementation is required to

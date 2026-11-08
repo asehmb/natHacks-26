@@ -76,7 +76,7 @@ class AckTests(unittest.TestCase):
         for offset in (0, 2, 3, 4, 5, 7, 23, 27, 28, 29):
             with self.subTest(offset=offset):
                 serial = FakeSerial(change_byte(offset))
-                with self.assertRaises(ValueError):
+                with self.assertRaises(host.SessionError):
                     host.send_sequence(serial, SESSION, b'\0'*8, hold_seconds=0)
                 self.assertEqual(serial.commands, [host.OPEN_SESSION])
 
@@ -87,14 +87,14 @@ class AckTests(unittest.TestCase):
 
     def test_rejected_move_stops_sequence(self):
         serial = FakeSerial(change_byte(30), fail_command=host.MOVE)
-        with self.assertRaisesRegex(ValueError, 'rejected'):
+        with self.assertRaisesRegex(host.SessionError, 'rejected'):
             host.send_sequence(serial, SESSION, b'\0'*8, hold_seconds=0)
         self.assertEqual(serial.commands, [2, 3, 4])
 
     def test_missing_ack_at_each_stage(self):
         for command, expected in ((2, [2]), (3, [2, 3]), (4, [2, 3, 4]), (5, [2, 3, 4, 5])):
             serial = FakeSerial(lambda raw: None, fail_command=command)
-            with self.subTest(command=command), self.assertRaises(TimeoutError):
+            with self.subTest(command=command), self.assertRaises(host.SessionError):
                 host.send_sequence(serial, SESSION, b'\0'*8, hold_seconds=0, ack_timeout=0.001)
             self.assertEqual(serial.commands, expected)
 

@@ -140,5 +140,5 @@ int poll_byte() {
             continue
     else:
         raise AssertionError('No simulated HELLO for production sender')
-    send_sequence(serial, session, payload_for_angles([90, 85, 100, 90]), hold_seconds=0.2)
+    send_sequence(serial, session, payload_for_angles([90, 85, 100, 90]), hold_seconds=0.8)
     print('PASS: production sender verified all ACKs from mocked combined firmware')

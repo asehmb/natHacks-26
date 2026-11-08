@@ -7,12 +7,12 @@ Requires pyserial only for hardware mode. The ESP32 must implement HELLO and rec
 OPEN_SESSION, ARM, MOVE, HEARTBEAT and return authenticated ACKs.
 """
 import argparse
-import hashlib
 import hmac
 import math
 import struct
 import sys
 import time
+import threading
 from pathlib import Path
 
 HEADER = struct.Struct('<2sBBBH16sI')
@@ -21,6 +21,11 @@ HELLO, OPEN_SESSION, ARM, MOVE, STOP, HEARTBEAT = 1, 2, 3, 4, 5, 6
 JOINT_NAMES = ('base', 'shoulder', 'elbow', 'gripper')
 # Temporary conservative *command* limits. Replace after mechanical calibration.
 LIMITS = ((60, 120), (60, 120), (60, 120), (70, 110))
+COMMAND_NAMES = {2: 'OPEN_SESSION', 3: 'ARM', 4: 'MOVE', 5: 'STOP', 6: 'HEARTBEAT'}
+
+
+class SessionError(RuntimeError):
+    """The host cannot use this session again."""
 
 
 def cobs_encode(data):
@@ -133,11 +138,14 @@ def verify_ack(raw, session, counter, command):
     size = 3 if command == OPEN_SESSION else 4
     if len(raw) != HEADER.size + size + 32:
         raise ValueError('ACK length mismatch')
-    expected = (b'AR', 1, 1, 0x80, size, session, counter)
-    if HEADER.unpack(raw[:HEADER.size]) != expected:
-        raise ValueError('ACK header/session/counter mismatch')
     if not hmac.compare_digest(raw[-32:], hmac.digest(KEY, raw[:-32], 'sha256')):
         raise ValueError('ACK HMAC invalid')
+    expected = (b'AR', 1, 1, 0x80, size, session, counter)
+    actual = HEADER.unpack(raw[:HEADER.size])
+    for label, got, wanted in zip(('magic', 'version', 'direction', 'type',
+                                   'payload length', 'session', 'counter'), actual, expected):
+        if got != wanted:
+            raise ValueError(f'ACK {label} mismatch: expected {wanted!r}, received {got!r}')
     payload = raw[HEADER.size:-32]
     if payload[0] != command:
         raise ValueError('ACK command mismatch')
@@ -176,27 +184,144 @@ def send_and_wait_ack(ser, kind, session, counter, payload=b'', ack_timeout=0.3)
     raise TimeoutError(f'ACK timeout command=0x{kind:02x} counter={counter}; sequence aborted')
 
 
-def send_sequence(ser, session, targets, hold_seconds=1.0, ack_timeout=0.3):
-    """One-shot motion test. Every command gates the next on an accepted ACK.
+class ArmLinkSession:
+    """Own serial I/O and counters; heartbeat runs until STOP, close or failure.
 
-    On failure send nothing further; never retry ambiguous motion commands.
-    The receiver watchdog then applies its agreed timeout policy.
+    No other reader/writer may use this serial object during the session.
+    A failed instance is terminal; construct a new one and open/arm explicitly.
     """
-    counter = 0
+    def __init__(self, ser, heartbeat_interval=0.25, ack_timeout=0.15):
+        if not 0 < heartbeat_interval <= 0.25 or not 0 < ack_timeout <= 0.15:
+            raise ValueError('Heartbeat interval must be <=250 ms; ACK timeout <=150 ms')
+        self.ser = ser
+        # Bound real pyserial reads so an ACK deadline cannot be hidden by an
+        # indefinitely blocking read. Mock transports need not expose timeout.
+        if hasattr(ser, 'timeout') and (ser.timeout is None or ser.timeout > 0.02):
+            ser.timeout = 0.02
+        if hasattr(ser, 'write_timeout') and (ser.write_timeout is None or ser.write_timeout > 0.15):
+            ser.write_timeout = 0.15
+        self.interval = heartbeat_interval
+        self.ack_timeout = ack_timeout
+        self.session = None
+        self.counter = 0
+        self.usable = False
+        self.armed = False
+        self.failure = None
+        self.last_sent = None
+        self._lock = threading.RLock()
+        self._closed = threading.Event()
+        self._worker = None
+        self._opened = False
 
-    def exchange(kind, payload=b''):
-        nonlocal counter
-        counter += 1
-        send_and_wait_ack(ser, kind, session, counter, payload, ack_timeout)
+    def _fail(self, reason):
+        self.failure = reason
+        self.usable = False
+        self.armed = False
+        self._closed.set()
 
-    exchange(OPEN_SESSION)
-    exchange(ARM)
-    exchange(MOVE, targets)
-    end = time.monotonic() + hold_seconds
-    while time.monotonic() < end:
-        exchange(HEARTBEAT)
-        time.sleep(0.1)
-    exchange(STOP)
+    def _check(self):
+        if not self.usable:
+            raise SessionError((self.failure or 'Session is not open') +
+                               '; fresh HELLO/OPEN_SESSION and explicit ARM required')
+
+    def _exchange(self, kind, payload=b''):
+        # Caller holds the lock: commands and heartbeat cannot steal each other's ACK.
+        self._check()
+        name = COMMAND_NAMES[kind]
+        if self.last_sent is not None and time.monotonic()-self.last_sent >= 0.5:
+            self._fail('Local watchdog deadline exceeded before '+name)
+            self._check()
+        self.counter += 1
+        self.last_sent = time.monotonic()
+        try:
+            send_and_wait_ack(self.ser, kind, self.session, self.counter,
+                              payload, self.ack_timeout)
+        except (OSError, ValueError, TimeoutError) as error:
+            reason = f'{name} counter={self.counter}: {error}'
+            self._fail(reason)
+            raise SessionError(reason + '; session unusable; fresh HELLO/OPEN_SESSION and explicit ARM required') from error
+
+    def open(self):
+        with self._lock:
+            if self._opened:
+                raise SessionError('Create a new session object for a fresh HELLO/OPEN_SESSION')
+            self._opened = True
+            try:
+                self.session = wait_hello(self.ser)
+            except (OSError, ValueError, TimeoutError) as error:
+                self._fail('HELLO: '+str(error))
+                raise SessionError(self.failure) from error
+            self._start_authenticated(self.session)
+
+    def _start_authenticated(self, session):
+        # Internal compatibility path for callers that already verified HELLO.
+        with self._lock:
+            self.session = session
+            self.usable = True
+            self._opened = True
+            self._exchange(OPEN_SESSION)
+            self._worker = threading.Thread(target=self._heartbeat_loop,
+                                            name='armlink-heartbeat', daemon=True)
+            self._worker.start()
+
+    def arm(self):
+        with self._lock:
+            self._exchange(ARM)
+            self.armed = True
+
+    def move(self, targets):
+        with self._lock:
+            self._check()
+            if not self.armed:
+                raise SessionError('Explicit ARM required before MOVE')
+            self._exchange(MOVE, targets)
+
+    def stop(self):
+        with self._lock:
+            self._exchange(STOP)
+            self.armed = False
+
+    def _heartbeat_loop(self):
+        while not self._closed.wait(0.005):
+            with self._lock:
+                if not self.usable:
+                    return
+                if self.armed and time.monotonic()-self.last_sent >= self.interval:
+                    try:
+                        self._exchange(HEARTBEAT)
+                    except SessionError as error:
+                        print(f'FAIL: {error}', file=sys.stderr)
+                        return
+
+    def check(self):
+        with self._lock:
+            self._check()
+
+    def close(self):
+        # Closing NEVER sends STOP: timeout must hold, whereas STOP detaches.
+        with self._lock:
+            self.usable = False
+            self.armed = False
+            self._closed.set()
+        if self._worker is not None:
+            self._worker.join()
+
+
+def send_sequence(ser, session, targets, hold_seconds=1.0, ack_timeout=0.15):
+    """Compatibility one-shot test using a HELLO already authenticated by caller."""
+    client = ArmLinkSession(ser, ack_timeout=ack_timeout)
+    # The existing entry point has already verified HELLO; no second read needed.
+    try:
+        client._start_authenticated(session)
+        client.arm()
+        client.move(targets)
+        end = time.monotonic() + hold_seconds
+        while time.monotonic() < end:
+            client.check()
+            time.sleep(min(0.02, max(0, end-time.monotonic())))
+        client.stop()  # Successful explicit end only; never sent on failure.
+    finally:
+        client.close()
 
 
 def main():
@@ -225,13 +350,13 @@ def main():
     if not args.send_motion:
         p.error('hardware movement requires --send-motion; use --dry-run for packet tests')
     import serial
-    with serial.Serial(args.port, args.baud, timeout=0.15, write_timeout=1) as ser:
+    with serial.Serial(args.port, args.baud, timeout=0.02, write_timeout=0.15) as ser:
         # Opening USB serial may reset the ESP32; HELLO must come from the actual receiver.
         session = wait_hello(ser)
         print('RX valid HELLO. Session:', session.hex())
         try:
             send_sequence(ser, session, targets)
-        except (OSError, ValueError, TimeoutError) as error:
+        except (OSError, ValueError, TimeoutError, SessionError) as error:
             raise SystemExit(f'FAIL: {error}. No further commands sent; receiver watchdog handles timeout.')
     print('PASS: all commands acknowledged; receiver confirmed STOP/disarmed.')
 
