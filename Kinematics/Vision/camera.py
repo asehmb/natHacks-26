@@ -5,7 +5,7 @@ import sys
 
 import cv2
 
-from config import load_config
+from Kinematics.config import load_config
 
 
 def parse_source(source):

@@ -4,8 +4,8 @@ import cv2
 import numpy as np
 import pytest
 
-from config import load_config
-from Vision.detection import detect_blocks, draw_detections
+from Kinematics.config import load_config
+from Kinematics.Vision.detection import detect_blocks, draw_detections
 
 
 def blank():

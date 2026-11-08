@@ -8,8 +8,8 @@ import time
 import cv2
 import numpy as np
 
-from config import load_config
-from Vision.camera import open_camera, read_frame
+from Kinematics.config import load_config
+from Kinematics.Vision.camera import open_camera, read_frame
 
 
 def _settings(config, color):

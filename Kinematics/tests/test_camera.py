@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from Vision import camera
+from Kinematics.Vision import camera
 
 
 @pytest.mark.parametrize("source,expected", [("0", 0), (1, 1), (" 2 ", 2),
