@@ -16,7 +16,7 @@ jobs:
   # Parser, dialogue, dispatcher and fallback must work with nothing but pytest + numpy installed;
   # tests that need opencv / onnxruntime skip themselves.
   core:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -33,7 +33,7 @@ jobs:
 
   # Everything, including video reading and provider selection (no model downloads, no network).
   vision:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
