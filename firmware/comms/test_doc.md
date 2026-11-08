@@ -1,6 +1,10 @@
 
 # EasyBot MK2 — ESP32 ArmLink Integration Test Handoff
 
+**Historical handoff:** host ACK verification has since been implemented; see
+[ACK_SENDER.md](ACK_SENDER.md) for current sender behavior and laptop validation.
+See COMBINED_TEST.md for recorded hardware results and the current mock backend.
+
 **Scope:** Verify that Python kinematics commands reach the ESP32, are authenticated and decoded, and are handed to the servo-control layer. **Test communication with all servo power disconnected first.** This is a teammate handoff/test plan, not a claim that the ESP32 receiver is already integrated.
 
 ## 0. What is already working
