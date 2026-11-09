@@ -84,9 +84,8 @@ def configure_arm(config: Optional[dict] = None) -> None:
 # Initialize with geometry from arm_config.yaml
 configure_arm()
 
-# Servo range used to reject out-of-range servo angles. Confirm against the real servos.
-SERVO_MIN_DEG = 0.0
-SERVO_MAX_DEG = 180.0
+# Per-servo commanded limits (deg) for servos 1, 2, 3: the firmware's, see kinematic_model SERVO_LIMITS_DEG.
+SERVO_LIMITS_DEG = EEZYbotARM_Mk2.SERVO_LIMITS_DEG
 
 
 class JointLimitError(ValueError):
@@ -142,11 +141,9 @@ def joint_to_servo(q: Sequence[float]) -> Vec3:
         servos = _ARM.map_kinematicsToServoAngles(q1=q1, q2=q2, q3=q3)
     except Exception as exc:  # the model raises a bare Exception on limit violations
         raise JointLimitError(f"{exc} (angles are in radians here; got {tuple(q)})") from exc
-    for name, s in zip(("servo1", "servo2", "servo3"), servos):
-        if not SERVO_MIN_DEG <= s <= SERVO_MAX_DEG:
-            raise JointLimitError(
-                f"{name}={s} deg is outside the servo range ({SERVO_MIN_DEG}, {SERVO_MAX_DEG})"
-            )
+    for name, s, (lo, hi) in zip(("servo1", "servo2", "servo3"), servos, SERVO_LIMITS_DEG):
+        if not lo <= s <= hi:
+            raise JointLimitError(f"{name}={s} deg is outside the servo range ({lo}, {hi})")
     return servos
 
 

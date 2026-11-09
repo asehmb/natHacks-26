@@ -1,4 +1,5 @@
 
+
 """EasyBot MK2 host sender for firmware/comms/armlink.c.
 
 Packet-only test: python3 firmware/comms/send_ik.py --dry-run --angles 90 85 100 90
@@ -20,8 +21,21 @@ KEY = bytes([0x0B]) * 32  # Existing firmware TEST KEY, not secure for deploymen
 HELLO, OPEN_SESSION, ARM, MOVE, STOP, HEARTBEAT = 1, 2, 3, 4, 5, 6
 JOINT_NAMES = ('base', 'shoulder', 'elbow', 'gripper')
 # Temporary conservative *command* limits. Replace after mechanical calibration.
-LIMITS = ((60, 120), (60, 120), (60, 120), (70, 110))
+waypoints = [
+    (0.20,  0.00, 0.15),  # Center
+    (0.183, 0.10, 0.15),  # Left 8 cm
+    (0.20,  0.00, 0.15),  # Center
+    (0.183, -0.10, 0.15), # Right 8 cm
+    (0.20,  0.00, 0.15),  # Center
+]
+LIMITS = (
+    (0, 180),    # Base
+    (20, 160),   # Shoulder
+    (15, 130),   # Elbow
+    (0, 180),    # Gripper
+)
 COMMAND_NAMES = {2: 'OPEN_SESSION', 3: 'ARM', 4: 'MOVE', 5: 'STOP', 6: 'HEARTBEAT'}
+VERBOSE = True  # print every TX packet and RX ACK (heartbeats included); callers may turn it off
 
 
 class SessionError(RuntimeError):
@@ -130,7 +144,8 @@ def send(ser, kind, session, counter, payload=b''):
     if ser.write(frame) != len(frame):
         raise OSError('Incomplete serial write')
     ser.flush()
-    print(f'TX kind=0x{kind:02x} counter={counter} bytes={len(frame)}')
+    if VERBOSE:
+        print(f'TX kind=0x{kind:02x} counter={counter} bytes={len(frame)}')
 
 
 def verify_ack(raw, session, counter, command):
@@ -179,7 +194,8 @@ def send_and_wait_ack(ser, kind, session, counter, payload=b'', ack_timeout=0.3)
                 raise ValueError('Receiver session changed while awaiting ACK')
             continue
         verify_ack(raw, session, counter, kind)
-        print(f'RX authenticated ACK command=0x{kind:02x} counter={counter}')
+        if VERBOSE:
+            print(f'RX authenticated ACK command=0x{kind:02x} counter={counter}')
         return
     raise TimeoutError(f'ACK timeout command=0x{kind:02x} counter={counter}; sequence aborted')
 
@@ -324,25 +340,71 @@ def send_sequence(ser, session, targets, hold_seconds=1.0, ack_timeout=0.15):
         client.close()
 
 
+
+def wait_with_heartbeat(client, seconds):
+    """Wait without blocking the session's heartbeat worker."""
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        client.check()
+        time.sleep(min(0.02, max(0, end - time.monotonic())))
+
+
+def send_waypoints(ser, session, angles_list, targets_list):
+    """Send a sequence in one authenticated session, then explicitly STOP.
+
+    Timing is based on the firmware's commanded 1 degree per 30 ms, not
+    physical feedback. Only use after verifying the arm's initial pose and
+    every waypoint's path and clearance. STOP may remove holding torque.
+    """
+    if len(angles_list) != len(targets_list):
+        raise ValueError('Mismatched angles and targets')
+    client = ArmLinkSession(ser)
+    previous = [90.0] * 4  # Assumed startup command; NOT measured physical pose.
+    try:
+        client._start_authenticated(session)
+        client.arm()
+        for index, (angles, targets) in enumerate(zip(angles_list, targets_list), 1):
+            client.check()
+            print(f'Executing waypoint {index}/{len(targets_list)}')
+            client.move(targets)
+            max_delta = max(abs(a-b) for a, b in zip(angles, previous))
+            # Firmware steps 1 degree / 30 ms, plus a settling margin.
+            wait_seconds = max_delta * 0.030 + 0.75
+            print(f'Estimated wait: {wait_seconds:.2f}s (not measured feedback)')
+            wait_with_heartbeat(client, wait_seconds)
+            previous = list(angles)
+        client.stop()
+    finally:
+        # On failures, do NOT blindly send STOP: watchdog handles session loss.
+        client.close()
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     src = p.add_mutually_exclusive_group(required=True)
     src.add_argument('--angles', nargs=4, type=float, metavar=('BASE', 'SHOULDER', 'ELBOW', 'GRIPPER'))
     src.add_argument('--xyz', nargs=3, type=float, metavar=('X', 'Y', 'Z'), help='meters; gripper uses --gripper')
+    src.add_argument('--sequence', action='store_true', help='Execute the XYZ waypoints defined near the top of this file')
     p.add_argument('--gripper', type=float, default=90)
     p.add_argument('--port', help='ESP32 serial port')
     p.add_argument('--baud', type=int, default=115200)
     p.add_argument('--dry-run', action='store_true')
     p.add_argument('--send-motion', action='store_true', help='Explicitly ARM and send a MOVE packet')
     args = p.parse_args()
-    angles = args.angles if args.angles is not None else angles_from_xyz(args.xyz, args.gripper)
-    targets = payload_for_angles(angles)
-    print('Servo targets:', dict(zip(JOINT_NAMES, angles)))
-    print('MOVE payload:', targets.hex())
-    demo_session = bytes(range(16))
-    test_frame = cobs_encode(packet(MOVE, demo_session, 3, targets))
-    assert cobs_decode(test_frame) == packet(MOVE, demo_session, 3, targets)
-    print('Offline framing test passed:', len(test_frame), 'bytes')
+    if args.sequence:
+        # Validate every waypoint before any physical motion is requested.
+        planned_angles = [angles_from_xyz(xyz, args.gripper) for xyz in waypoints]
+    else:
+        planned_angles = [args.angles if args.angles is not None
+                          else angles_from_xyz(args.xyz, args.gripper)]
+    targets_list = [payload_for_angles(angles) for angles in planned_angles]
+    for index, (angles, targets) in enumerate(zip(planned_angles, targets_list), 1):
+        print(f'Waypoint {index} servo targets:', dict(zip(JOINT_NAMES, angles)))
+        print('MOVE payload:', targets.hex())
+        demo_session = bytes(range(16))
+        test_frame = cobs_encode(packet(MOVE, demo_session, 3, targets))
+        assert cobs_decode(test_frame) == packet(MOVE, demo_session, 3, targets)
+        print('Offline framing test passed:', len(test_frame), 'bytes')
     if args.dry_run:
         return
     if not args.port:
@@ -355,7 +417,10 @@ def main():
         session = wait_hello(ser)
         print('RX valid HELLO. Session:', session.hex())
         try:
-            send_sequence(ser, session, targets)
+            if args.sequence:
+                send_waypoints(ser, session, planned_angles, targets_list)
+            else:
+                send_sequence(ser, session, targets_list[0])
         except (OSError, ValueError, TimeoutError, SessionError) as error:
             raise SystemExit(f'FAIL: {error}. No further commands sent; receiver watchdog handles timeout.')
     print('PASS: all commands acknowledged; receiver confirmed STOP/disarmed.')

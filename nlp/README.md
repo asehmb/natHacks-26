@@ -20,7 +20,8 @@ disp.register(Home, lambda a: arm.home())
 result = proc.process("pick up the red screwdriver and give it to me")
 disp.dispatch(result.actions)   # raises KeyError before running anything if a handler is missing
 ```
-Actions: `PickUp PutDown PutIn Give MoveRelative Home ReturnToZero RotateJoint OpenHand CloseHand Shake Reply`.
+Actions: `PickUp PutDown PutIn Give MoveRelative Home ReturnToUser ReturnToZero RotateJoint OpenHand CloseHand Shake Reply`.
+`ReturnToUser` is "come back to me" (back to the hand-off pose); plain "come back" stays a relative move.
 `Reply` carries text plus an optional `Shake` gesture. A target of `None` means "the held object".
 Commands are all-or-nothing: if any clause isn't understood, nothing is executed and a `Reply` explains.
 

@@ -12,7 +12,7 @@ static uint8_t key[32], incoming[128];
 static size_t used;
 static bool dropping;
 static uint32_t lastHello, timeoutCount;
-static ServoBridge<MockServoBackend> servos;
+ServoBridge<Esp32ServoBackend> servos;
 static uint32_t appliedMoves;
 
 static void freshSession() {
@@ -37,7 +37,19 @@ static void reply(uint8_t kind, uint8_t command, uint8_t result, uint32_t counte
   memcpy(out + 7, receiver.session_id, 16);
   put32(out + 23, counter);
   if (kind == ARMLINK_STATE) {
-    out[27] = receiver.session_active; out[28] = receiver.armed; out[29] = 0;
+    out[27] = receiver.session_active; out[28] = receiver.armed;
+    // Report whether physical PWM is actually attached.
+    bool outputsActive = false;
+
+    for (int i = 0; i < kJointCount; ++i) {
+      if (servos.backend.attached[i]) {
+        outputsActive = true;
+        break;
+      }
+    }
+
+    out[29] = outputsActive ? 1 : 0;
+
     for (int i=0; i<4; ++i) {
       out[30+2*i] = servos.positions[i] & 255;
       out[31+2*i] = servos.positions[i] >> 8;
@@ -55,46 +67,97 @@ static void expire(uint32_t now) {
     servos.timeout(); ++timeoutCount; freshSession();
   }
 }
+
 static void dispatch(uint8_t *packet, size_t length) {
   uint32_t now = millis();
   expire(now);
+
   if (receive_open_session(&receiver, packet, length, key, now)) {
     uint8_t ack[62];
-    if (build_open_session_ack(&receiver, key, ack)) transmit(ack, sizeof ack);
+    if (build_open_session_ack(&receiver, key, ack))
+      transmit(ack, sizeof ack);
     return;
   }
-  if (!receiver.session_active || !has_valid_packet_layout(packet, length) ||
-      packet[3] != 0) return;
-  // Authenticate once on a candidate state. Commit only accepted commands.
+
+  if (!receiver.session_active ||
+      !has_valid_packet_layout(packet, length) ||
+      packet[3] != 0)
+    return;
+
   ReceiverState next = receiver;
-  if (!accept_authenticated_packet(packet, length, key, receiver.session_id,
-                                    &next.last_counter)) return;
+
+  if (!accept_authenticated_packet(
+          packet, length, key,
+          receiver.session_id,
+          &next.last_counter))
+    return;
+
   uint8_t kind = packet[4];
   uint32_t counter = next.last_counter;
+
   next.last_valid_ms = now;
   bool accepted = false;
-  if (length == 59 && (kind == ARMLINK_ARM || kind == ARMLINK_STOP)) {
-    if (kind == ARMLINK_STOP) servos.stop();
-    next.armed = kind == ARMLINK_ARM; accepted = true;
-  } else if (length == 59 && (kind == ARMLINK_GET_STATE || kind == ARMLINK_HEARTBEAT)) {
+
+  if (length == 59 && kind == ARMLINK_ARM) {
+    // Arm only after an authenticated command.
+    next.armed = true;
     accepted = true;
+
+  } else if (length == 59 && kind == ARMLINK_STOP) {
+    // Cancel pending movement and disable PWM.
+    servos.stop();
+    next.armed = false;
+    accepted = true;
+
+  } else if (
+      length == 59 &&
+      (kind == ARMLINK_GET_STATE ||
+       kind == ARMLINK_HEARTBEAT)) {
+    accepted = true;
+
   } else if (kind == ARMLINK_MOVE && receiver.armed) {
     int16_t targets[4];
-    if (decode_move_targets(packet, length, targets) && servos.apply(targets)) {
+
+    if (decode_move_targets(packet, length, targets) &&
+        servos.apply(targets)) {
       ++appliedMoves;
       accepted = true;
     }
   }
-  if (accepted) receiver = next;
-  reply(kind == ARMLINK_GET_STATE && accepted ? ARMLINK_STATE : ARMLINK_ACK,
-        kind, accepted ? 0 : 1, counter);
+
+  if (accepted) {
+    receiver = next;
+
+    // Synchronize physical motion permission
+    // with the authenticated receiver state.
+    servos.backend.motionAllowed = receiver.armed;
+  }
+
+  reply(
+    kind == ARMLINK_GET_STATE && accepted
+        ? ARMLINK_STATE
+        : ARMLINK_ACK,
+    kind,
+    accepted ? 0 : 1,
+    counter
+  );
 }
+
 void setup() {
   memset(key, 0x0b, sizeof key); Serial.begin(115200);
   freshSession(); lastHello = millis()-250;
 }
 void loop() {
-  uint32_t now = millis(); expire(now);
+
+    uint32_t now = millis();
+
+    // Check safety timeout before issuing another
+    // incremental movement command.
+    expire(now);
+
+    servos.backend.update();
+    servos.syncPositions();
+
   if (!receiver.session_active && (uint32_t)(now-lastHello) >= 250) {
     uint8_t hello[59];
     if (build_hello_packet(receiver.session_id, key, hello)) transmit(hello, sizeof hello);

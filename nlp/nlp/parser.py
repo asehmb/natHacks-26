@@ -9,7 +9,7 @@ from typing import Optional
 from . import lexicon as L
 from .actions import (
     Action, CloseHand, Give, Home, MoveRelative, ObjectRef, OpenHand, PickUp, PutDown,
-    PutIn, Reply, ReturnToZero, RotateJoint, Shake,
+    PutIn, Reply, ReturnToUser, ReturnToZero, RotateJoint, Shake,
 )
 
 
@@ -90,6 +90,14 @@ def parse_object(toks: list[str]) -> Optional[ObjectRef]:
             continue
         else:
             noun.append(t)
+    if color is None and len(noun) > 1:
+        # A typo'd colour in front of the head noun ("bluw container"); the head noun itself is never snapped.
+        for i, t in enumerate(noun[:-1]):
+            m = difflib.get_close_matches(t, L.COLORS, n=1, cutoff=0.75) if len(t) >= 4 and t not in L.VOCAB else []
+            if m:
+                color = m[0]
+                del noun[i]
+                break
     for t in rest:
         if t in L.POSITIONS:
             position = position or t
@@ -160,6 +168,9 @@ class Parser:
         if re.fullmatch(r"(?:(?:return|go|move|come|reset)(?: back)?(?: to)? )?(?:0|zero|origin)(?: position)?", joined) \
                 or joined in ("reset", "zero position"):
             return [ReturnToZero()]
+        if re.fullmatch(r"(?:come|go|move|head|get)(?: back)?(?: over)? to me|come back here|return to me|back to me",
+                        joined):
+            return [ReturnToUser()]
         if re.fullmatch(r"(?:(?:go|return|come|move|head)(?: back)?(?: to)? )?home(?: position)?", joined):
             return [Home()]
 

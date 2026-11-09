@@ -1,0 +1,20 @@
+[project]
+name = "natHacks26-armvision"
+version = "0.1.0"
+description = "Mat-calibrated vision for the EEZYbot arm: objects, arm tracking and grasp coordinates"
+requires-python = ">=3.10"
+dependencies = ["numpy", "opencv-python>=4.8", "PyYAML"]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+yolo = ["onnxruntime", "tokenizers", "huggingface_hub"]
+arm = ["matplotlib>=3.7", "scipy>=1.10", "ruamel.yaml>=0.18,<0.19", "pyserial"]
+voice = ["sounddevice", "faster-whisper"]
+
+[tool.setuptools]
+packages = ["armvision"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = ["real_ik: run the real Kinematics IK instead of the stub"]
