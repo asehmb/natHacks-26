@@ -7,11 +7,11 @@ ESP32 over an authenticated serial link.
 Built at natHacks 2026. The aim is an assistive arm that someone can hand an object to and tell, in plain speech,
 where to put it.
 
-![The container finder locating an orange container in front of the arm](vision/containers.png)
+![The container finder locating an orange container in front of the arm](IMG_3196.jpeg)
 
 ## How to access it
 
-- **Source code:** https://github.com/asehmb/natHacks-26
+- **Source code:** <https://github.com/asehmb/natHacks-26>
 - **Clone:** `git clone https://github.com/asehmb/natHacks-26.git && cd natHacks-26`
 - **Requirements:** Python 3.10+, a webcam, and (to drive real hardware) an EEZYbot Arm Mk2 wired to an ESP32. Without
   the arm or a camera, the language side, the planner and the simulator all still run (see
@@ -32,13 +32,13 @@ where to put it.
 
 ## Repository layout
 
-| Folder | What it does | Details |
-| --- | --- | --- |
-| [`nlp/`](nlp/README.md) | Turns sentences into typed actions (`PickUp`, `PutIn`, `ReturnToUser`, …). Stdlib-only rule parser with typo correction, optional local LLM fallback (Ollama), and open-vocabulary object grounding (YOLO-World + CLIP, ONNX). | [nlp/README.md](nlp/README.md) |
-| [`vision/`](vision/README.md) | `armvision`: the marker-free container finder (`find_containers.py`), the older ArUco mat pipeline, and the end-to-end `talk_to_arm.py`. | [vision/README.md](vision/README.md) |
-| [`Kinematics/`](Kinematics/README.md) | EEZYbot Mk2 FK/IK in meters and radians, pick-and-place primitives, a planner state machine, a `MockArm`, a 3D simulator and the shared `arm_config.yaml`. | [Kinematics/README.md](Kinematics/README.md) |
-| `firmware/comms/` | ArmLink protocol: C library (`armlink.c/h`), the ESP32 sketch `combined_only/`, and the Python host sender `send_ik.py`. Hardware test records are in the `*_TEST.md` files. | [COMBINED_TEST.md](firmware/comms/COMBINED_TEST.md), [ACK_SENDER.md](firmware/comms/ACK_SENDER.md) |
-| `firmware/servoWork/` | Original plain-text servo sketch (`base 90`, …), kept for bench testing. It does not speak ArmLink. | |
+| Folder                                | What it does                                                                                                                                                                                                                   | Details                                                                                            |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------- |
+| [`nlp/`](nlp/README.md)               | Turns sentences into typed actions (`PickUp`, `PutIn`, `ReturnToUser`, …). Stdlib-only rule parser with typo correction, optional local LLM fallback (Ollama), and open-vocabulary object grounding (YOLO-World + CLIP, ONNX). | [nlp/README.md](nlp/README.md)                                                                     |
+| [`vision/`](vision/README.md)         | `armvision`: the marker-free container finder (`find_containers.py`), the older ArUco mat pipeline, and the end-to-end `talk_to_arm.py`.                                                                                       | [vision/README.md](vision/README.md)                                                               |
+| [`Kinematics/`](Kinematics/README.md) | EEZYbot Mk2 FK/IK in meters and radians, pick-and-place primitives, a planner state machine, a `MockArm`, a 3D simulator and the shared `arm_config.yaml`.                                                                     | [Kinematics/README.md](Kinematics/README.md)                                                       |
+| `firmware/comms/`                     | ArmLink protocol: C library (`armlink.c/h`), the ESP32 sketch `combined_only/`, and the Python host sender `send_ik.py`. Hardware test records are in the `*_TEST.md` files.                                                   | [COMBINED_TEST.md](firmware/comms/COMBINED_TEST.md), [ACK_SENDER.md](firmware/comms/ACK_SENDER.md) |
+| `firmware/servoWork/`                 | Original plain-text servo sketch (`base 90`, …), kept for bench testing. It does not speak ArmLink.                                                                                                                            |                                                                                                    |
 
 ## Hardware
 
@@ -61,20 +61,27 @@ python -m venv .venv
 ```
 
 1. **Calibrate the camera to the sheet** (once, and again whenever the camera moves). No printed markers are needed:
+
    ```bash
    .venv/bin/python find_containers.py --calibrate --source 0
    ```
+
    Click the two far corners and the two pen ticks, check the reported error, then press `s`. See
    [vision/README.md](vision/README.md#container-finder-no-markers) for the full procedure.
 2. **Dry run.** Every MOVE is validated and printed, and nothing is sent:
+
    ```bash
    .venv/bin/python talk_to_arm.py --source 0
    ```
+
 3. **Real arm.** It asks before the first move:
+
    ```bash
    .venv/bin/python talk_to_arm.py --source 0 --port /dev/cu.usbserial-10 [--mic]
    ```
+
 4. **No camera or arm** (handy for testing the language side):
+
    ```bash
    .venv/bin/python talk_to_arm.py --no-gui --container blue:250:36.5 \
        --say "grab this item, put it in the blue container, then come back to me"
@@ -135,14 +142,14 @@ CI (`.github/workflows/tests.yml`) runs the `nlp` suite on Python 3.10, 3.12 and
 
 There are no slides or demo video yet. Everything below is in this repository.
 
-| Material | What it shows |
-| --- | --- |
-| [Live container detection](vision/containers.png) | The camera view with the detected container outlined (base and rim) and its position in the arm frame. |
-| [Debug view](<vision/debug output.png>) | The top-down debug window: green blobs became containers, red ones were dropped (with the reason). |
-| [Sheet layout](vision/sheet_layout.png) | Where the arm, camera, pen ticks and calibration clicks go on the white sheet. |
-| [nlp/README.md](nlp/README.md) | Parser actions, LLM fallback and open-vocabulary grounding. |
-| [vision/README.md](vision/README.md) | Container finder calibration, JSON output, arm moves and `talk_to_arm.py` options. |
-| [Kinematics/README.md](Kinematics/README.md), [MEASUREMENTS.md](Kinematics/docs/MEASUREMENTS.md) | Kinematics conventions, shared config and the arm measurement worksheet. |
-| [firmware/comms/COMBINED_TEST.md](firmware/comms/COMBINED_TEST.md) and the other `*_TEST.md` files | Recorded ESP32 results for the handshake, heartbeat, rejection and reliability tests. |
-| [.claude/plan.md](.claude/plan.md), [container-finder-plan.md](.claude/container-finder-plan.md), [container-move-plan.md](.claude/container-move-plan.md) | Design notes for the NLP, the marker-free container finder and the container moves. |
-| [CI workflow](.github/workflows/tests.yml) | The automated tests that run on every push and pull request. |
+| Material                                                                                                                                                   | What it shows                                                                                          |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| [Live container detection](vision/containers.png)                                                                                                          | The camera view with the detected container outlined (base and rim) and its position in the arm frame. |
+| [Debug view](<vision/debug output.png>)                                                                                                                    | The top-down debug window: green blobs became containers, red ones were dropped (with the reason).     |
+| [Sheet layout](vision/sheet_layout.png)                                                                                                                    | Where the arm, camera, pen ticks and calibration clicks go on the white sheet.                         |
+| [nlp/README.md](nlp/README.md)                                                                                                                             | Parser actions, LLM fallback and open-vocabulary grounding.                                            |
+| [vision/README.md](vision/README.md)                                                                                                                       | Container finder calibration, JSON output, arm moves and `talk_to_arm.py` options.                     |
+| [Kinematics/README.md](Kinematics/README.md), [MEASUREMENTS.md](Kinematics/docs/MEASUREMENTS.md)                                                           | Kinematics conventions, shared config and the arm measurement worksheet.                               |
+| [firmware/comms/COMBINED_TEST.md](firmware/comms/COMBINED_TEST.md) and the other `*_TEST.md` files                                                         | Recorded ESP32 results for the handshake, heartbeat, rejection and reliability tests.                  |
+| [.claude/plan.md](.claude/plan.md), [container-finder-plan.md](.claude/container-finder-plan.md), [container-move-plan.md](.claude/container-move-plan.md) | Design notes for the NLP, the marker-free container finder and the container moves.                    |
+| [CI workflow](.github/workflows/tests.yml)                                                                                                                 | The automated tests that run on every push and pull request.                                           |
