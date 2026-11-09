@@ -10,12 +10,12 @@ sheet:
   # points: [[x, y], ...]     # optional: override the 4 click points (far-left, far-right, left tick, right tick)
 
 arm:
-  base_from_edge_mm: 0 # base rotation axis to the sheet's arm-end edge, along the sheet (on the edge)
-  base_offset_mm: 0 # base axis to the LEFT of the sheet centre line (negative = right)
+  base_from_edge_mm: 100 # base rotation axis is 100 mm in from the sheet's arm-end edge (as far back as it fits)
+  base_offset_mm: 0 # base axis to the LEFT of the sheet centre line (negative = right); 215 of 430 = centred
   base_yaw_deg: 0 # sheet's long axis vs the arm's forward direction, counter-clockwise
 
 zone: # only containers inside this region count for find()
-  x_mm: [300, 400] # usable strip: the 10 cm along the far (camera-side) edge, across from the arm ...
+  x_mm: [200, 300] # usable strip: the 10 cm along the far (camera-side) edge, across from the arm ...
   y_mm: [-165, 165] # ... minus 5 cm on each side of the 43 cm width
   max_reach_mm: 480 # distance from the base axis (not limiting here; the planner checks reachability)
   max_angle_deg: 180 # 30 would match the q1 limit in Kinematics/kinematic_model.py but cuts this strip to a wedge

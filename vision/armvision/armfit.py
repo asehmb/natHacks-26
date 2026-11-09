@@ -13,15 +13,19 @@ import numpy as np
 
 from .mat import Frames, MatPose
 
-Q1_RANGE, Q2_RANGE = (-30.0, 30.0), (39.0, 120.0)   # Mk2 joint limits (Kinematics/kinematic_model.py)
+# Mk2 joint limits from the firmware servo limits (firmware/comms/combined_only/servo_bridge.h), mapped as in
+# Kinematics/kinematic_model.py: servo1 = -2.0497*q1 + 91.726, servo2 = 180 - q2, servo3 = q2 + q3 + 135.
+SERVO_LIMITS_DEG = ((0, 180), (20, 160), (15, 130))
+Q1_RANGE = ((91.726 - SERVO_LIMITS_DEG[0][1]) / 2.0497, (91.726 - SERVO_LIMITS_DEG[0][0]) / 2.0497)
+Q2_RANGE = (180.0 - SERVO_LIMITS_DEG[1][1], 180.0 - SERVO_LIMITS_DEG[1][0])
 CAP_MM = 80.0
 MIN_MASK_PX = 40
 MAX_COST_MM = 40.0
 
 
 def q3_limits(q2):
-    """Experimentally determined Mk2 limits for joint 3 given joint 2 (degrees)."""
-    return -0.6755 * q2 - 70.768, -0.7165 * q2 - 13.144
+    """Mk2 limits for joint 3 given joint 2 (degrees), from the elbow servo limits."""
+    return SERVO_LIMITS_DEG[2][0] - 135 - q2, SERVO_LIMITS_DEG[2][1] - 135 - q2
 
 
 def skeleton(q: np.ndarray, links, n: int = 10) -> np.ndarray:

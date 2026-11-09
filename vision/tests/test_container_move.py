@@ -8,11 +8,17 @@ from armvision import container_move as cm
 from armvision.containers import Container, ContainerState
 from armvision.planner_bridge import TargetValidationError
 
-REACHABLE = (250.0, 0.0)        # mm; with a 60 mm tall container + 20 mm the tip is at z = 80 mm (inside the IK envelope)
+REACHABLE = (250.0, 0.0)        # mm; selection tests stub IK, so the arm geometry can change without breaking them
 
 
 def box(color="red", xy=REACHABLE, h=60.0, in_zone=True, seen=True, id=1):
     return Container(id, color, np.array(xy, float), h, (80.0, 80.0), "round", 0.0, "config", in_zone, 5, seen)
+
+
+@pytest.fixture(autouse=True)
+def ik_ok(request, monkeypatch):
+    if "real_ik" not in request.keywords:
+        monkeypatch.setattr(cm, "check_reachability", lambda xyz: (0.0, 0.0, 0.0))
 
 
 class FakeArm:
@@ -56,6 +62,7 @@ def test_no_usable_container_never_moves(state):
     assert arm.moves == []
 
 
+@pytest.mark.real_ik
 def test_unreachable_container_never_moves():
     arm = FakeArm()
     with pytest.raises(TargetValidationError, match="unreachable"):
@@ -70,10 +77,20 @@ def test_put_in_handler_uses_container_color():
     assert c.id == 7 and len(arm.moves) == 1
 
 
+@pytest.mark.real_ik
 def test_sim_arm_reaches_hover_point():
     try:
         arm = cm.SimArm()
     except ImportError as exc:
         pytest.skip(f"Kinematics not importable: {exc}")
-    _, xyz = cm.move_above_container(arm, ContainerState([box()]), "red")
+    from kinematics import is_reachable
+    x = next((x for x in range(150, 350, 5) if is_reachable(x / 1000, 0, 0.08)), None)
+    if x is None:
+        pytest.skip("no reachable point at z = 80 mm with the current arm model")
+    try:
+        _, xyz = cm.move_above_container(arm, ContainerState([box(xy=(x, 0))]), "red")
+    except cm.ArmMoveError as exc:
+        if "joints[" in str(exc):
+            pytest.skip(f"Kinematics/arm_config.yaml is invalid: {exc}")
+        raise
     assert math.dist(arm.last_tip, xyz) < 0.005

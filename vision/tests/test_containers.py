@@ -264,7 +264,8 @@ def test_frame_of_other_size_same_aspect_is_rescaled(cam):
 # ------------------------------------------------------------------------------------------ config
 def test_default_config_file_loads():
     cfg = load_container_config()
-    assert cfg.sheet.width_mm == 430 and cfg.zone.x_mm == (300.0, 400.0) and cfg.arm.base_from_edge_mm == 0
+    assert cfg.sheet.width_mm == 430 and cfg.zone.x_mm == (200.0, 300.0) and cfg.arm.base_from_edge_mm == 100 \
+        and cfg.arm.base_offset_mm == 0
 
 
 @pytest.mark.parametrize("bad", [

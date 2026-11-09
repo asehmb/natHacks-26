@@ -47,3 +47,28 @@ def draw_rect(img, center_mm, size_mm, angle_deg, color):
 
 def to_camera(canvas):
     return cv2.warpPerspective(canvas, H_CANVAS2IMG, IMG_SIZE, borderValue=(90, 90, 90))
+
+
+# A real pinhole view of the mat (K, pose and image agree), for tests that need true 3D geometry, not just a homography.
+PIN_K = np.array([[900.0, 0, IMG_SIZE[0] / 2], [0, 900.0, IMG_SIZE[1] / 2], [0, 0, 1]])
+
+
+def _look_at(eye, target, up=(0, 0, 1)):
+    """World->camera (R, t) for an OpenCV camera (x right, y down, z forward) at eye looking at target (mat mm)."""
+    eye, target = np.asarray(eye, float), np.asarray(target, float)
+    z = target - eye
+    z /= np.linalg.norm(z)
+    x = np.cross(z, up)
+    x /= np.linalg.norm(x)
+    R = np.array([x, np.cross(z, x), z])
+    return R, -R @ eye
+
+
+PIN_R, PIN_T = _look_at((450.0, 150.0, 600.0), (120.0, 150.0, 0.0))   # far side, looking back at the arm over the mat
+
+
+def pin_camera(canvas):
+    """Canvas (mat at SCALE px/mm, y flipped) -> image seen by the PIN_K camera at (PIN_R, PIN_T)."""
+    canvas2mat = np.array([[1 / SCALE, 0, 0], [0, -1 / SCALE, 300], [0, 0, 1]])
+    H = PIN_K @ np.c_[PIN_R[:, 0], PIN_R[:, 1], PIN_T] @ canvas2mat
+    return cv2.warpPerspective(canvas, H, IMG_SIZE, borderValue=(90, 90, 90))

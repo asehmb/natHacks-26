@@ -93,17 +93,67 @@ class SimArm:
         pass
 
 
-class UsbArm:
-    """Real arm through firmware/comms/send_ik.py: one session, ARMed once, one MOVE per command."""
+def _send_ik():
+    if str(_COMMS_DIR) not in sys.path:
+        sys.path.insert(0, str(_COMMS_DIR))
+    import send_ik
+    return send_ik
 
-    def __init__(self, port: str, baud: int = 115200, gripper_deg: float = 90.0):
-        if str(_COMMS_DIR) not in sys.path:
-            sys.path.insert(0, str(_COMMS_DIR))
+
+def _fmt(angles) -> str:
+    return ", ".join(f"{a:.1f}" for a in angles)
+
+
+class DryArm:
+    """No hardware: the same IK, servo mapping and firmware payload limits as UsbArm, printed instead of sent."""
+
+    def __init__(self, gripper_deg: float = 90.0):
+        self._ik, self.gripper_deg = _send_ik(), gripper_deg
+        self._last_angles: Optional[list] = None
+
+    def angles_for(self, xyz: Vec3) -> list:
+        """Servo angles for xyz (m) at the current gripper angle; ArmMoveError if IK or the payload limits reject it."""
+        try:
+            angles = self._ik.angles_from_xyz(tuple(xyz), self.gripper_deg)
+            self._ik.payload_for_angles(angles)
+        except ValueError as exc:
+            raise ArmMoveError(str(exc)) from exc
+        return angles
+
+    def check_xyz(self, xyz: Vec3) -> None:
+        self.angles_for(xyz)
+
+    def move_to_xyz(self, xyz: Vec3, settle: bool = True) -> None:
+        self._last_angles = self.angles_for(xyz)
+        print(f"dry: MOVE {' '.join(f'{v * 1000:.0f}' for v in xyz)} mm -> servos {_fmt(self._last_angles)}")
+
+    def set_gripper(self, deg: float) -> None:
+        if self._last_angles is None:
+            raise ArmMoveError("move the arm before using the gripper")
+        self._ik.payload_for_angles([*self._last_angles[:3], deg])
+        self.gripper_deg, self._last_angles = deg, [*self._last_angles[:3], deg]
+        print(f"dry: gripper -> {deg:.0f} deg")
+
+    def close(self) -> None:
+        pass
+
+
+class UsbArm:
+    """Real arm through firmware/comms/send_ik.py: one session, ARMed once, one MOVE per command.
+
+    After each MOVE it waits as long as send_ik.send_waypoints does (firmware steps 1 degree / 30 ms, plus 0.75 s to
+    settle; 0.05 s for an intermediate waypoint), keeping the heartbeat alive. That is commanded timing, not feedback;
+    the first move assumes 90 degrees.
+    """
+
+    def __init__(self, port: str, baud: int = 115200, gripper_deg: float = 90.0, verbose: bool = False):
         import serial
-        import send_ik
-        self._ik, self.gripper_deg = send_ik, gripper_deg
+        self._ik, self.gripper_deg = _send_ik(), gripper_deg
+        self._ik.VERBOSE = verbose             # per-packet TX/ACK lines (4 heartbeats a second) only when asked
+        self._previous = [90.0] * 4            # send_ik's assumed start-up command, not a measured pose
+        self._last_angles: Optional[list] = None
         self._ser = serial.Serial(port, baud, timeout=0.02, write_timeout=0.15)
-        self._session = send_ik.ArmLinkSession(self._ser)
+        self._session = self._ik.ArmLinkSession(self._ser)
         try:
             self._session.open()           # opening USB serial may reset the ESP32: waits for its HELLO
             self._session.arm()
@@ -111,15 +161,35 @@ class UsbArm:
             self._ser.close()
             raise ArmMoveError(f"could not open/arm the ArmLink session on {port}: {exc}") from exc
 
-    def move_to_xyz(self, xyz: Vec3) -> None:
+    angles_for = DryArm.angles_for
+    check_xyz = DryArm.check_xyz
+
+    def _send(self, angles, settle: bool) -> float:
         try:
-            angles = self._ik.angles_from_xyz(tuple(xyz), self.gripper_deg)
             self._session.move(self._ik.payload_for_angles(angles))
+            wait_s = max(abs(a - b) for a, b in zip(angles, self._previous)) * 0.030 + (0.75 if settle else 0.05)
+            self._ik.wait_with_heartbeat(self._session, wait_s)
+            self._previous = self._last_angles = list(angles)
         except self._ik.SessionError as exc:
             raise ArmMoveError(f"{exc} (restart to reconnect)") from exc
         except ValueError as exc:
             raise ArmMoveError(str(exc)) from exc
-        print("arm: MOVE acknowledged, servo targets " + ", ".join(f"{a:.1f}" for a in angles))
+        return wait_s
+
+    def move_to_xyz(self, xyz: Vec3, settle: bool = True) -> None:
+        """settle=False: an intermediate waypoint of a path, so only a short wait after the MOVE."""
+        angles = self.angles_for(xyz)
+        wait_s = self._send(angles, settle)
+        if settle:
+            print(f"arm: MOVE done, servo targets {_fmt(angles)} (waited {wait_s:.1f} s)")
+
+    def set_gripper(self, deg: float) -> None:
+        """Same arm pose, new gripper angle."""
+        if self._last_angles is None:
+            raise ArmMoveError("move the arm before using the gripper")
+        self._send([*self._last_angles[:3], deg], settle=True)
+        self.gripper_deg = deg
+        print(f"arm: gripper -> {deg:.0f} deg")
 
     def close(self) -> None:
         try:
@@ -132,6 +202,9 @@ class UsbArm:
             self._ser.close()
 
 
-def make_arm(port: Optional[str] = None, baud: int = 115200, gripper_deg: float = 90.0):
-    """UsbArm when a serial port is given, otherwise the MockArm simulation."""
-    return UsbArm(port, baud, gripper_deg) if port else SimArm()
+def make_arm(port: Optional[str] = None, baud: int = 115200, gripper_deg: float = 90.0, dry: bool = False,
+             verbose: bool = False):
+    """UsbArm when a serial port is given, otherwise DryArm (dry=True) or the MockArm simulation."""
+    if port:
+        return UsbArm(port, baud, gripper_deg, verbose)
+    return DryArm(gripper_deg) if dry else SimArm()

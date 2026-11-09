@@ -114,3 +114,35 @@ From the NLP side ("put it in the red container"):
 
 The current IK model reaches only about 235–265 mm from the base at a hover height of 60 mm, and 312 mm at most. A
 container outside that range is rejected with an "unreachable" message and the arm does not move.
+
+## Talk to the arm (end to end, base locked)
+
+`talk_to_arm.py` wires the whole chain together: typed text → `nlp` parser → container vision → a planar path →
+ArmLink MOVEs. The base servo is broken and disabled in the firmware (`servo_bridge.h`, `enabled[0] = false`;
+reflash `combined_only`), so the arm only moves forward/back and up/down along its centre line (y = 0).
+
+    python talk_to_arm.py --source 0                                  # dry run: every MOVE validated and printed
+    python talk_to_arm.py --source 0 --port /dev/cu.usbserial-10      # real arm (asks before the first move)
+    python talk_to_arm.py --no-gui --container blue:250:36.5 \
+        --say "grab this item, put it in the blue container, then come back to me"   # no camera, no arm
+
+    > grab this item                    gripper closes on what you hand it, at the hand-off pose
+    > put it in the blue container      over the container, down to --clearance-mm (40) above the rim, open, lift
+    > come back to me                   back to the hand-off pose, gripper still open
+
+- The hand-off pose ("me") is the arm reaching out past the containers: `--handoff-mm 320 120` (x, z). It goes there
+  at start-up with the gripper open.
+- The gripper angles are placeholders: tune `--gripper-open` (120) / `--gripper-closed` (60) with `grab` and
+  `open your hand` first.
+- A container must be within `--y-tol-mm` (40) of the arm's line, or the arm refuses and tells you which way to slide
+  it. `--container COLOR:X_MM[:H_MM]` puts a fixed container on the line instead of using vision.
+- Paths are 10 mm straight-line steps. Every waypoint passes IK and the firmware limits before the first MOVE is
+  sent. If one command fails, the rest of the sentence is skipped and the arm stays where it is. Commands with no
+  handler (rotate joint, move left…) do nothing.
+- Quitting sends STOP, which detaches the servos, so support the arm.
+
+Push to talk: `pip install -e ".[voice]"`, then add `--mic`. At the prompt press Enter, say the command, press Enter
+again. It prints what it heard and runs it; you can still type instead. Speech is transcribed offline by faster-whisper
+(`--mic-model base.en`, about 140 MB downloaded on first use; `tiny.en` is faster). The first time, macOS asks to let
+your terminal use the microphone. If it only hears silence, allow it in System Settings > Privacy & Security >
+Microphone and restart the terminal.
