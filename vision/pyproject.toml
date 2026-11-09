@@ -8,6 +8,7 @@ dependencies = ["numpy", "opencv-python>=4.8", "PyYAML"]
 [project.optional-dependencies]
 dev = ["pytest"]
 yolo = ["onnxruntime", "tokenizers", "huggingface_hub"]
+arm = ["matplotlib>=3.7", "scipy>=1.10", "ruamel.yaml>=0.18,<0.19", "pyserial"]
 
 [tool.setuptools]
 packages = ["armvision"]

@@ -1,0 +1,41 @@
+# Marker-free container finder. All lengths in mm, arm base frame: x forward (towards the camera), y left, z up.
+# Measure the sheet and where the arm base axis sits on it, then run `python find_containers.py --calibrate`.
+sheet:
+  width_mm: 430 # sheet width (the side that runs along the camera's left-right direction)
+  length_mm: 400 # arm-end edge to camera-end edge. The arm-end corners are cut out, so they are not clicked.
+  # Calibration clicks: the 2 far (camera-end) corners + 2 pen ticks on the long edges, mark_distance_mm from the
+  # arm-end edge. Put the ticks beyond the corner cutouts (measure how deep they are) and as far from the far edge
+  # as you can: the further apart, the better the focal length/height estimate (or set camera.fov_deg).
+  mark_distance_mm: 250
+  # points: [[x, y], ...]     # optional: override the 4 click points (far-left, far-right, left tick, right tick)
+
+arm:
+  base_from_edge_mm: 0 # base rotation axis to the sheet's arm-end edge, along the sheet (on the edge)
+  base_offset_mm: 0 # base axis to the LEFT of the sheet centre line (negative = right)
+  base_yaw_deg: 0 # sheet's long axis vs the arm's forward direction, counter-clockwise
+
+zone: # only containers inside this region count for find()
+  x_mm: [300, 400] # usable strip: the 10 cm along the far (camera-side) edge, across from the arm ...
+  y_mm: [-165, 165] # ... minus 5 cm on each side of the 43 cm width
+  max_reach_mm: 480 # distance from the base axis (not limiting here; the planner checks reachability)
+  max_angle_deg: 180 # 30 would match the q1 limit in Kinematics/kinematic_model.py but cuts this strip to a wedge
+
+containers:
+  heights_mm: { orange: 36.5, blue: 36.5 } # e.g. {red: 85}: a measured height beats the automatic estimate (wide bowls need it)
+  default_height_mm: 80 # used when the height can't be estimated
+  max_height_mm: 200
+  min_footprint_mm2: 2500
+  colors: [orange, blue] # only look for these colours (null = all); stops table/skin/shadows becoming containers
+  min_saturation: 0.6 # plastic is vivid (0.85-1.0); shadows, glow through translucent plastic and the sheet in shade are 0.3-0.5
+  hue_ranges: # degrees; the shaded side of an orange tub drifts to hue ~8, which is "red" by default
+    orange: [[0, 40], [350, 360]]
+  sheet_margin_mm: 60 # ignore colour farther than this outside the sheet outline (null = off)
+
+camera:
+  fov_deg: null # horizontal FOV; null = estimate from the 4 clicked points
+
+tracking:
+  gate_mm: 30
+  ema: 0.3
+  max_missed: 10
+  min_age: 3 # frames before a container is reported
