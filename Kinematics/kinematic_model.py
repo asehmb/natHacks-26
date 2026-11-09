@@ -1402,7 +1402,7 @@ class EEZYbotARM_Mk2(EEZYbotARM):
         servoAngle_q1 = round(servoAngle_q1, 2)
 
         # Calculate for q2
-        servoAngle_q2 = 180 - q2  # approximate adjusted q2 value
+        servoAngle_q2 = q2  # Mk2 shoulder direction reversed; verify with unloaded hardware
         servoAngle_q2 = round(servoAngle_q2, 2)
 
         # Calculate for q3
@@ -1516,4 +1516,5 @@ class EEZYbotARM_Mk1(EEZYbotARM):
         servoAngle_q3 = round(servoAngle_q3, 2)
 
         return servoAngle_q1, servoAngle_q2, servoAngle_q3
+
 

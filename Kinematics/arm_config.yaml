@@ -43,33 +43,33 @@ links:
 # servo_angle_rad = sign * q_rad + zero_offset
 joints:
   - name: base
-    sign: 1  # MEASURE ME
-    zero_offset: 1.5707963267948966  # MEASURE ME: radians
-    min: -1.0  # MEASURE ME: radians; deliberately restricted example range
-    max: 1.0  # MEASURE ME
-    max_velocity: 0.3  # MEASURE ME: rad/s
+    sign: 0  # MEASURE ME
+    zero_offset: 0.5707963267948966  # MEASURE ME: radians
+    min: -2.0  # MEASURE ME: radians; deliberately restricted example range
+    max: 0.0  # MEASURE ME
+    max_velocity: -1.3  # MEASURE ME: rad/s
   - name: shoulder
-    sign: 1  # MEASURE ME
-    zero_offset: 1.5707963267948966  # MEASURE ME
-    min: -0.8  # MEASURE ME
-    max: 0.8  # MEASURE ME
-    max_velocity: 0.3  # MEASURE ME
+    sign: -2  # MEASURE ME
+    zero_offset: 0.5707963267948966  # MEASURE ME
+    min: -1.8  # MEASURE ME
+    max: -1.8  # MEASURE ME
+    max_velocity: -1.3  # MEASURE ME
   - name: elbow
-    sign: -1  # MEASURE ME
-    zero_offset: 1.5707963267948966  # MEASURE ME
-    min: -0.8  # MEASURE ME
-    max: 0.8  # MEASURE ME
-    max_velocity: 0.3  # MEASURE ME
+    sign: -2  # MEASURE ME
+    zero_offset: 0.5707963267948966  # MEASURE ME
+    min: -1.8  # MEASURE ME
+    max: -1.8  # MEASURE ME
+    max_velocity: -1.3  # MEASURE ME
   - name: wrist
-    sign: 1  # MEASURE ME
-    zero_offset: 1.5707963267948966  # MEASURE ME
-    min: -0.8  # MEASURE ME
-    max: 0.8  # MEASURE ME
-    max_velocity: 0.3  # MEASURE ME
+    sign: 0  # MEASURE ME
+    zero_offset: 0.5707963267948966  # MEASURE ME
+    min: -1.8  # MEASURE ME
+    max: -1.8  # MEASURE ME
+    max_velocity: -1.3  # MEASURE ME
   - name: gripper
-    sign: 1  # MEASURE ME
-    zero_offset: 0.0  # MEASURE ME
-    min: 0.0  # MEASURE ME: angular actuator coordinate, not jaw width
+    sign: 0  # MEASURE ME
+    zero_offset: -1.0  # MEASURE ME
+    min: -1.0  # MEASURE ME: angular actuator coordinate, not jaw width
     max: 1.0  # MEASURE ME
     max_velocity: 0.3  # MEASURE ME
 
