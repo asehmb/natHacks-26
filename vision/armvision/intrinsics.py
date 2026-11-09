@@ -28,6 +28,20 @@ class Intrinsics:
             "image_size": list(self.image_size), "camera_matrix": self.K.tolist(),
             "dist_coeffs": self.dist.reshape(-1).tolist(), "rms": self.rms}))
 
+    def scaled(self, new_size: tuple[int, int]) -> Intrinsics:
+        """Return a copy of Intrinsics scaled to a new image resolution (width, height)."""
+        w, h = int(new_size[0]), int(new_size[1])
+        if w <= 0 or h <= 0:
+            raise ValueError(f"invalid image size {new_size}")
+        w0, h0 = self.image_size
+        sx, sy = w / w0, h / h0
+        K_new = self.K.copy().astype(np.float64)
+        K_new[0, 0] *= sx
+        K_new[0, 2] *= sx
+        K_new[1, 1] *= sy
+        K_new[1, 2] *= sy
+        return Intrinsics(K_new, self.dist.copy(), (w, h), self.calibrated, self.rms)
+
 
 def load_intrinsics(path=DEFAULT_PATH) -> Intrinsics | None:
     path = Path(path)
@@ -60,6 +74,11 @@ def calibrate(views: list[tuple[np.ndarray, np.ndarray]], image_size: tuple[int,
     if len(views) < 5:
         raise ValueError(f"need at least 5 views, got {len(views)}")
     w, h = image_size
+    if w <= 0 or h <= 0:
+        raise ValueError(f"invalid image size {image_size}")
+    for i, (obj, img) in enumerate(views):
+        if len(obj) != len(img) or len(obj) == 0:
+            raise ValueError(f"view {i}: empty or mismatched points")
     K0 = camera_matrix(w, h, 60.0)
     rms, K, dist, _, _ = cv2.calibrateCamera(
         [v[0] for v in views], [v[1] for v in views], image_size, K0, None,

@@ -23,6 +23,7 @@ class Track:
     age: int = 1
     missed: int = 0
     occluded: bool = False
+    seen: bool = True
 
 
 def _ema_yaw(old: float, new: float, w: float) -> float:
@@ -63,10 +64,12 @@ class Tracker:
             t.age += 1
             t.missed = 0
             t.occluded = False
+            t.seen = True
         keep = []
         for ti, t in enumerate(self.tracks):
             if ti not in used_t:
                 t.age += 1
+                t.seen = False
                 t.occluded = bool(in_arm(t.obs.center))
                 if t.occluded:
                     t.missed = 0      # kept while the arm is over it
@@ -78,6 +81,6 @@ class Tracker:
         self.tracks = keep
         for oi, o in enumerate(observations):
             if oi not in used_o:
-                self.tracks.append(Track(self._next, o))
+                self.tracks.append(Track(self._next, o, seen=True))
                 self._next += 1
         return self.tracks

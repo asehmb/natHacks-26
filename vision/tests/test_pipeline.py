@@ -80,3 +80,61 @@ def test_find_helper(cfg):
     assert state.find(position="far")[0].color == "blue"
     with pytest.raises(ValueError):
         state.find(position="sideways")
+
+
+def test_stale_object_not_returned_by_find(cfg):
+    vs = make_system(cfg)
+    canvas = mat_canvas(cfg)
+    draw_rect(canvas, (200, 150), (40, 40), 0, (0, 0, 220))   # red block
+    state1 = vs.process(to_camera(canvas))
+    assert len(state1.objects) == 1 and state1.objects[0].seen is True
+    assert len(state1.find(color="red")) == 1
+
+    # Remove the object in next frame (empty canvas with mat markers)
+    empty_canvas = mat_canvas(cfg)
+    state2 = vs.process(to_camera(empty_canvas))
+    assert len(state2.objects) == 1                      # track kept briefly for continuity
+    assert state2.objects[0].seen is False               # marked not seen this frame
+    assert state2.objects[0].missed == 1
+    assert state2.find(color="red") == []                # excluded from pickup selection by default!
+    assert len(state2.find(color="red", allow_stale=True)) == 1
+
+
+def test_capture_reference_requires_current_markers(cfg):
+    vs = VisionSystem(cfg)
+    # 1. capture_reference on blank frame (no markers) must fail
+    blank = np.zeros((*IMG_SIZE[::-1], 3), np.uint8)
+    assert not vs.capture_reference(blank)
+
+    # 2. Establish a pose
+    valid = to_camera(mat_canvas(cfg))
+    vs.process(valid)
+    assert vs.pose is not None
+
+    # 3. Now attempt capture_reference with blank frame again (no markers visible now)
+    # Must FAIL and NOT reuse the old pose!
+    assert not vs.capture_reference(blank)
+
+
+def test_lost_markers_tracked_and_expires(cfg):
+    cfg.vision.max_pose_age = 2
+    vs = make_system(cfg)
+    valid = to_camera(mat_canvas(cfg))
+    s1 = vs.process(valid)
+    assert s1.mat_visible is True and s1.pose_age == 0 and s1.pose_fresh is True
+    assert vs.pose is not None
+
+    # Frame with no markers visible
+    blank = np.zeros((*IMG_SIZE[::-1], 3), np.uint8)
+    s2 = vs.process(blank)
+    assert s2.mat_visible is False and s2.pose_age == 1 and s2.pose_fresh is False
+    assert vs.pose is not None  # within grace period
+
+    s3 = vs.process(blank)
+    assert s3.mat_visible is False and s3.pose_age == 2 and s3.pose_fresh is False
+    assert vs.pose is not None  # still at limit
+
+    # Exceeds max_pose_age -> pose must expire
+    s4 = vs.process(blank)
+    assert s4.mat_visible is False and s4.pose_age == 3 and s4.pose_fresh is False
+    assert vs.pose is None

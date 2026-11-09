@@ -40,27 +40,42 @@ class TrackedObject:
     size_mm: tuple[float, float]
     occluded: bool
     age: int
+    seen: bool = True
+    missed: int = 0
 
     def to_dict(self):
         return {"id": self.id, "color": self.color, "label": self.label, "center_mm": _r(self.center_mm),
                 "grasp_mm": _r(self.grasp_mm), "grasp_yaw_deg": round(float(self.grasp_yaw_deg), 1),
-                "size_mm": _r(self.size_mm), "occluded": self.occluded, "age": self.age}
+                "size_mm": _r(self.size_mm), "occluded": self.occluded, "age": self.age,
+                "seen": self.seen, "missed": self.missed}
 
 
 @dataclass
 class WorldState:
     mat_visible: bool = False
+    pose_age: int = 0
     arm: ArmState = field(default_factory=ArmState)
     objects: list[TrackedObject] = field(default_factory=list)
 
+    @property
+    def pose_fresh(self) -> bool:
+        """True if the mat calibration was refreshed in this exact frame."""
+        return self.mat_visible and self.pose_age == 0
+
     def to_dict(self):
-        return {"mat_visible": self.mat_visible, "arm": self.arm.to_dict(),
+        return {"mat_visible": self.mat_visible, "pose_age": self.pose_age,
+                "pose_fresh": self.pose_fresh, "arm": self.arm.to_dict(),
                 "objects": [o.to_dict() for o in self.objects]}
 
-    def find(self, color: str | None = None, position: str | None = None) -> list[TrackedObject]:
+    def find(self, color: str | None = None, position: str | None = None,
+             allow_stale: bool = False, allow_occluded: bool = False) -> list[TrackedObject]:
         """Objects matching a colour and/or a position word, best match first (default: nearest the base).
-        Positions are in the base frame: left/right (y), front/far/back/near (x), center."""
-        objs = [o for o in self.objects if color is None or o.color == color]
+        Positions are in the base frame: left/right (y), front/far/back/near (x), center.
+        Excludes stale (missed in current frame) and occluded objects by default."""
+        objs = [o for o in self.objects
+                if (color is None or o.color == color)
+                and (allow_stale or o.seen)
+                and (allow_occluded or not o.occluded)]
         keys = {
             "left": lambda o: -o.center_mm[1], "right": lambda o: o.center_mm[1],
             "front": lambda o: -o.center_mm[0], "far": lambda o: -o.center_mm[0],
@@ -77,23 +92,46 @@ class WorldState:
 class VisionSystem:
     def __init__(self, cfg: Config, intrinsics: Intrinsics | None = None):
         self.cfg = cfg
-        self.intrinsics = intrinsics
+        self._intrinsics = intrinsics
         self.detector = MarkerDetector()
         self.frames = Frames(cfg.arm)
         self.tracker = Tracker(cfg.vision.gate_mm, cfg.vision.max_missed, cfg.vision.ema)
         self.reference: np.ndarray | None = None
         self.pose: MatPose | None = None
+        self.pose_age: int = 0
         self.last_markers: dict[int, np.ndarray] = {}
+        self.last_raw_markers: dict[int, np.ndarray] = {}
         self.last_rect: np.ndarray | None = None
         self.last_fg: np.ndarray | None = None
         self.last_arm_mask: np.ndarray | None = None
 
+    @property
+    def intrinsics(self) -> Intrinsics | None:
+        return self._intrinsics
+
+    @intrinsics.setter
+    def intrinsics(self, val: Intrinsics | None):
+        self._intrinsics = val
+        self.reference = None
+        self.pose = None
+
     # -- setup -------------------------------------------------------------
     def _K(self, frame):
-        if self.intrinsics is None:
-            h, w = frame.shape[:2]
-            self.intrinsics = fallback_intrinsics(w, h, self.cfg.vision.fov_deg)
-        return self.intrinsics
+        h, w = frame.shape[:2]
+        if self._intrinsics is None:
+            self._intrinsics = fallback_intrinsics(w, h, self.cfg.vision.fov_deg)
+        elif self._intrinsics.image_size != (w, h):
+            raise ValueError(
+                f"Frame resolution {(w, h)} does not match camera calibration image size {self._intrinsics.image_size}. "
+                f"Recalibrate for this resolution or adjust intrinsics using intrinsics.scaled({(w, h)})."
+            )
+        return self._intrinsics
+
+    def adjust_intrinsics_for_frame(self, frame: np.ndarray) -> None:
+        """Explicitly scale the current calibration intrinsics to match the given frame's resolution."""
+        h, w = frame.shape[:2]
+        if self._intrinsics is not None and self._intrinsics.image_size != (w, h):
+            self.intrinsics = self._intrinsics.scaled((w, h))
 
     def _undistort(self, frame):
         intr = self._K(frame)
@@ -101,17 +139,30 @@ class VisionSystem:
 
     def update_pose(self, frame: np.ndarray):
         """Detect markers and refresh the mat pose. Returns (frame, detected_this_frame)."""
-        frame = self._undistort(frame)
-        self.last_markers = self.detector.detect(frame)
+        intr = self._K(frame)
+        self.last_raw_markers = self.detector.detect(frame)
+        if intr.calibrated and np.any(intr.dist):
+            undistorted = cv2.undistort(frame, intr.K, intr.dist)
+            self.last_markers = self.detector.detect(undistorted)
+        else:
+            undistorted = frame
+            self.last_markers = self.last_raw_markers
+
         pose = solve_mat(self.last_markers, self.cfg, self.intrinsics.K)
         if pose is not None:
             self.pose = pose
-        return frame, pose is not None
+            self.pose_age = 0
+        else:
+            self.pose_age += 1
+            max_age = getattr(self.cfg.vision, "max_pose_age", 5)
+            if self.pose_age > max_age:
+                self.pose = None
+        return undistorted, pose is not None
 
     def capture_reference(self, frame: np.ndarray) -> bool:
         """Store the current rectified view as the empty-mat reference."""
         frame, ok = self.update_pose(frame)
-        if self.pose is None:
+        if not ok or self.pose is None:
             return False
         self.set_reference(self.pose.rectify(frame))
         self.tracker.reset()
@@ -124,7 +175,7 @@ class VisionSystem:
     def process(self, frame: np.ndarray) -> WorldState:
         cfg, v = self.cfg, self.cfg.vision
         frame, detected = self.update_pose(frame)
-        state = WorldState(mat_visible=detected)
+        state = WorldState(mat_visible=detected, pose_age=self.pose_age)
         pose = self.pose
         if pose is None:
             return state
@@ -170,5 +221,5 @@ class VisionSystem:
             state.objects.append(TrackedObject(
                 t.id, o.color, "object", np.array([cb[0], cb[1], cfg.arm.mat_z_mm]),
                 np.array([gb[0], gb[1], v.grasp_z_mm]), self.frames.yaw_to_base(o.yaw_deg),
-                o.size, t.occluded, t.age))
+                o.size, t.occluded, t.age, seen=t.seen, missed=t.missed))
         return state

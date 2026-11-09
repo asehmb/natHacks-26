@@ -44,7 +44,8 @@ def draw_overlay(vs: VisionSystem, frame, state):
         col = (0, 165, 255) if o.occluded else (0, 0, 255)
         cv2.circle(out, tuple(int(x) for x in cp), 4, (255, 255, 255), -1)
         cv2.circle(out, tuple(int(x) for x in gp), 6, col, -1)
-        cv2.putText(out, f"#{o.id} {o.color} ({o.grasp_mm[0]:.0f},{o.grasp_mm[1]:.0f})",
+        color_tag = f" {o.color}" if o.color and o.color != "unknown" else ""
+        cv2.putText(out, f"#{o.id}{color_tag} ({o.grasp_mm[0]:.0f},{o.grasp_mm[1]:.0f})",
                     (int(cp[0]) + 8, int(cp[1]) - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
     if state.arm.visible:
         x, y, z = state.arm.gripper_mm
@@ -73,15 +74,17 @@ def main(argv=None):
         vs.set_reference(cv2.imread(args.reference))
     warnings.simplefilter("once")
     views = []
+    calib_size = None
     try:
         cap = open_camera(args.source)
     except RuntimeError as exc:
         ap.exit(1, f"{exc}\n")
     try:
         while True:
-            ok, frame = cap.read()
-            if not ok or frame is None:
+            ok, raw_frame = cap.read()
+            if not ok or raw_frame is None:
                 break
+            frame = raw_frame.copy()
             if args.no_gui and vs.reference is None:
                 vs.capture_reference(frame)
             state = vs.process(frame)
@@ -95,23 +98,34 @@ def main(argv=None):
             if key == ord("q"):
                 break
             if key == ord("r"):
-                print("reference captured" if vs.capture_reference(frame) else "mat not visible", file=sys.stderr)
+                print("reference captured" if vs.capture_reference(raw_frame) else "mat not visible", file=sys.stderr)
                 if args.reference and vs.reference is not None:
                     cv2.imwrite(args.reference, vs.reference)
             elif key == ord("c"):
-                vp = view_points(vs.last_markers, cfg)
+                raw_markers = vs.last_raw_markers if vs.last_raw_markers else vs.detector.detect(raw_frame)
+                vp = view_points(raw_markers, cfg)
                 if vp is None:
                     print("not enough mat markers visible for a calibration view", file=sys.stderr)
                 else:
+                    h, w = raw_frame.shape[:2]
+                    current_size = (w, h)
+                    if calib_size is not None and current_size != calib_size:
+                        print(f"resolution changed from {calib_size} to {current_size}; resetting views", file=sys.stderr)
+                        views.clear()
+                    calib_size = current_size
                     views.append(vp)
                     print(f"calibration views: {len(views)} (move the camera/mat; press k with >= 10)", file=sys.stderr)
             elif key == ord("k"):
                 try:
-                    h, w = frame.shape[:2]
+                    h, w = raw_frame.shape[:2]
+                    if calib_size is not None and (w, h) != calib_size:
+                        raise ValueError(f"frame size {(w, h)} does not match calibration views size {calib_size}")
                     intr = calibrate(views, (w, h))
                     intr.save(args.intrinsics)
                     vs.intrinsics = intr
-                    print(f"saved {args.intrinsics} (rms {intr.rms:.2f} px)", file=sys.stderr)
+                    views.clear()
+                    calib_size = None
+                    print(f"saved {args.intrinsics} (rms {intr.rms:.2f} px); reset mat reference", file=sys.stderr)
                 except (ValueError, cv2.error) as exc:
                     print(f"calibration failed: {exc}", file=sys.stderr)
     except KeyboardInterrupt:

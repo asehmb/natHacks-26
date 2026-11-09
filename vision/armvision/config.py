@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, fields
+import math
 from pathlib import Path
 
 import yaml
@@ -47,6 +48,7 @@ class VisionConfig:
     max_missed: int = 15
     ema: float = 0.5
     fov_deg: float = 60.0
+    max_pose_age: int = 5
 
 
 @dataclass
@@ -68,15 +70,33 @@ def _section(cls, raw, name):
     return cls(**raw)
 
 
+def _finite(value, name):
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        raise ConfigError(f"{name}: must be a finite number, got {value!r}")
+    return float(value)
+
+
 def _positive(value, name):
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+    _finite(value, name)
+    if value <= 0:
         raise ConfigError(f"{name}: must be a positive number, got {value!r}")
+
+
+def _non_negative(value, name):
+    _finite(value, name)
+    if value < 0:
+        raise ConfigError(f"{name}: must be non-negative, got {value!r}")
+
+
+def _non_negative_int(value, name):
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ConfigError(f"{name}: must be a non-negative integer, got {value!r}")
 
 
 def _pair(value, name):
     if (not isinstance(value, (list, tuple)) or len(value) != 2
-            or not all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in value)):
-        raise ConfigError(f"{name}: expected [x, y] numbers, got {value!r}")
+            or not all(isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) for v in value)):
+        raise ConfigError(f"{name}: expected finite [x, y] numbers, got {value!r}")
     return float(value[0]), float(value[1])
 
 
@@ -87,29 +107,56 @@ def validate(cfg: Config) -> Config:
                       (a.gripper_marker_size_mm, "arm.gripper_marker_size_mm"),
                       (a.base_zone_radius_mm, "arm.base_zone_radius_mm"),
                       (v.px_per_mm, "vision.px_per_mm"), (v.diff_threshold, "vision.diff_threshold"),
-                      (v.min_area_mm2, "vision.min_area_mm2"), (v.gate_mm, "vision.gate_mm"),
-                      (v.fov_deg, "vision.fov_deg")]:
+                      (v.min_area_mm2, "vision.min_area_mm2"), (v.gate_mm, "vision.gate_mm")]:
         _positive(val, name)
+
+    _finite(v.fov_deg, "vision.fov_deg")
+    if not (0 < v.fov_deg < 180):
+        raise ConfigError(f"vision.fov_deg: must be between 0 and 180 degrees, got {v.fov_deg!r}")
+
     if not isinstance(m.markers, dict) or not m.markers:
         raise ConfigError("mat.markers: need at least one marker id -> [x, y]")
-    m.markers = {int(k): _pair(c, f"mat.markers[{k}]") for k, c in m.markers.items()}
-    if not (1 <= m.min_markers <= len(m.markers)):
-        raise ConfigError(f"mat.min_markers: must be between 1 and {len(m.markers)}")
+
+    valid_markers = {}
+    for k, c in m.markers.items():
+        if isinstance(k, bool) or not (isinstance(k, int) or (isinstance(k, str) and k.isdigit())):
+            raise ConfigError(f"mat.markers: marker ID must be a non-negative integer, got {k!r}")
+        mid = int(k)
+        if mid < 0:
+            raise ConfigError(f"mat.markers: marker ID must be a non-negative integer, got {mid!r}")
+        valid_markers[mid] = _pair(c, f"mat.markers[{mid}]")
+    m.markers = valid_markers
+
+    if isinstance(m.min_markers, bool) or not isinstance(m.min_markers, int) or not (1 <= m.min_markers <= len(m.markers)):
+        raise ConfigError(f"mat.min_markers: must be an integer between 1 and {len(m.markers)}")
+
+    _non_negative_int(a.gripper_marker_id, "arm.gripper_marker_id")
     if a.gripper_marker_id in m.markers:
         raise ConfigError("arm.gripper_marker_id collides with a mat marker id")
+
     for mid, (x, y) in m.markers.items():
         h = m.marker_size_mm / 2
         if not (h <= x <= m.width_mm - h and h <= y <= m.height_mm - h):
             raise ConfigError(f"mat.markers[{mid}]: marker does not fit inside the mat")
+
     a.base_xy_mm = _pair(a.base_xy_mm, "arm.base_xy_mm")
-    if not 0 < v.ema <= 1:
+    _finite(a.base_yaw_deg, "arm.base_yaw_deg")
+    _finite(a.mat_z_mm, "arm.mat_z_mm")
+
+    _finite(v.ema, "vision.ema")
+    if not (0 < v.ema <= 1):
         raise ConfigError("vision.ema: must be in (0, 1]")
+
+    _finite(v.round_aspect, "vision.round_aspect")
     if v.round_aspect < 1:
         raise ConfigError("vision.round_aspect: must be >= 1")
-    if v.max_missed < 0:
-        raise ConfigError("vision.max_missed: must be >= 0")
-    if v.grasp_inset_mm < 0:
-        raise ConfigError("vision.grasp_inset_mm: must be >= 0")
+
+    _non_negative_int(v.max_missed, "vision.max_missed")
+    _non_negative_int(v.max_pose_age, "vision.max_pose_age")
+    _non_negative(v.grasp_inset_mm, "vision.grasp_inset_mm")
+    _non_negative(v.edge_margin_mm, "vision.edge_margin_mm")
+    _finite(v.grasp_z_mm, "vision.grasp_z_mm")
+
     return cfg
 
 

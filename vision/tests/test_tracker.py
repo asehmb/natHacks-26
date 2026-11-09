@@ -42,3 +42,19 @@ def test_far_detection_is_new_track():
     t.update([ob(100)])
     tr = t.update([ob(300)])
     assert sorted(x.id for x in tr) == [1, 2]
+
+
+def test_track_seen_flag_and_missed_counter():
+    t = Tracker(max_missed=3)
+    tr = t.update([ob(100)])
+    assert tr[0].seen is True and tr[0].missed == 0
+
+    # Next frame: object missing
+    tr = t.update([])
+    assert len(tr) == 1
+    assert tr[0].seen is False and tr[0].missed == 1
+
+    # Next frame: object returns
+    tr = t.update([ob(100)])
+    assert len(tr) == 1
+    assert tr[0].seen is True and tr[0].missed == 0
