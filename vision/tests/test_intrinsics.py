@@ -3,7 +3,7 @@ import pytest
 
 from armvision.config import load_config
 from armvision.intrinsics import Intrinsics, calibrate, fallback_intrinsics, view_points
-from armvision.pipeline import VisionSystem
+from armvision.pipeline import FrameSizeError, VisionSystem
 
 
 def test_fallback_intrinsics():
@@ -59,15 +59,19 @@ def test_intrinsics_setter_resets_reference_and_pose(cfg):
     assert vs.pose is None
 
 
-def test_mismatched_frame_resolution_rejected(cfg):
-    # Calibration loaded for 640x480
-    intr_640 = Intrinsics(np.eye(3), np.zeros(5), (640, 480))
-    vs = VisionSystem(cfg, intrinsics=intr_640)
+def test_same_aspect_resolution_is_rescaled(cfg):
+    K = np.array([[500.0, 0, 320], [0, 500, 240], [0, 0, 1]])
+    vs = VisionSystem(cfg, intrinsics=Intrinsics(K, np.zeros(5), (640, 480)))
+    vs.process(np.zeros((960, 1280, 3), dtype=np.uint8))
+    assert vs.intrinsics.image_size == (1280, 960)
+    assert vs.intrinsics.K[0, 0] == pytest.approx(1000.0)
 
-    # Feed a 1280x960 frame (shape 960, 1280, 3)
-    frame_1280 = np.zeros((960, 1280, 3), dtype=np.uint8)
-    with pytest.raises(ValueError, match=r"Frame resolution \(1280, 960\) does not match"):
-        vs.process(frame_1280)
+
+def test_rotated_frame_rejected(cfg):
+    # a phone flipping to portrait changes the aspect ratio: can't be fixed by scaling
+    vs = VisionSystem(cfg, intrinsics=Intrinsics(np.eye(3), np.zeros(5), (640, 480)))
+    with pytest.raises(FrameSizeError, match="aspect ratio"):
+        vs.process(np.zeros((640, 480, 3), dtype=np.uint8))
 
 
 def test_intrinsics_scaling_and_explicit_adjustment(cfg):

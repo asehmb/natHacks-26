@@ -38,6 +38,9 @@ class ArmConfig:
 class VisionConfig:
     px_per_mm: float = 2.0
     diff_threshold: float = 18.0
+    l_weight: float = 0.5       # lightness counts this much vs colour in the diff (lower = ignores shadows)
+    marker_margin_mm: float = 6.0   # printed mat markers (+ this margin) are never objects
+    min_age: int = 3            # frames an object must persist before it is reported
     min_area_mm2: float = 150.0
     edge_margin_mm: float = 4.0
     grasp_inset_mm: float = 15.0
@@ -155,6 +158,8 @@ def validate(cfg: Config) -> Config:
     _non_negative_int(v.max_pose_age, "vision.max_pose_age")
     _non_negative(v.grasp_inset_mm, "vision.grasp_inset_mm")
     _non_negative(v.edge_margin_mm, "vision.edge_margin_mm")
+    _non_negative(v.l_weight, "vision.l_weight")
+    _non_negative(v.marker_margin_mm, "vision.marker_margin_mm")
     _finite(v.grasp_z_mm, "vision.grasp_z_mm")
 
     return cfg

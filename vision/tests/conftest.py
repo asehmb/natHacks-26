@@ -12,7 +12,7 @@ def cfg():
     return validate(Config(
         MatConfig(400, 300, 40.0, {0: (30, 30), 1: (370, 30), 2: (370, 270), 3: (30, 270)}, 2),
         ArmConfig((-60, 150), 0, 0, 100, 10, 30.0),
-        VisionConfig(px_per_mm=2.0, min_area_mm2=100.0)))
+        VisionConfig(px_per_mm=2.0, min_area_mm2=100.0, min_age=1)))
 
 
 # canvas (mat at SCALE px/mm, y flipped) -> camera image, a trapezoid like an oblique view

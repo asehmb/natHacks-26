@@ -42,11 +42,21 @@ class Detection:
     area_mm2: float
 
 
-def foreground_mask(rect: np.ndarray, reference: np.ndarray, cfg: VisionConfig) -> np.ndarray:
-    """uint8 0/255 mask of pixels differing from the empty-mat reference (Lab distance)."""
+def foreground_mask(rect: np.ndarray, reference: np.ndarray, cfg: VisionConfig,
+                    ignore: np.ndarray | None = None) -> np.ndarray:
+    """uint8 0/255 mask of pixels differing from the empty-mat reference (Lab distance).
+
+    Robust to lighting: the frame-wide brightness shift (auto-exposure) is removed, lightness counts for
+    cfg.l_weight of a colour change so soft shadows on white paper stay below the threshold, and `ignore`
+    (0/255, e.g. the printed markers) is cleared."""
     a = cv2.cvtColor(cv2.GaussianBlur(rect, (5, 5), 0), cv2.COLOR_BGR2Lab).astype(np.float32)
     b = cv2.cvtColor(cv2.GaussianBlur(reference, (5, 5), 0), cv2.COLOR_BGR2Lab).astype(np.float32)
-    mask = (np.linalg.norm(a - b, axis=2) > cfg.diff_threshold).astype(np.uint8) * 255
+    d = a - b
+    d[..., 0] -= np.median(d[..., 0])
+    d[..., 0] *= cfg.l_weight
+    mask = (np.linalg.norm(d, axis=2) > cfg.diff_threshold).astype(np.uint8) * 255
+    if ignore is not None:
+        mask[ignore > 0] = 0
     k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, k)
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, k)

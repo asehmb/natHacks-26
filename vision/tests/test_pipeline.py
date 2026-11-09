@@ -138,3 +138,30 @@ def test_lost_markers_tracked_and_expires(cfg):
     s4 = vs.process(blank)
     assert s4.mat_visible is False and s4.pose_age == 3 and s4.pose_fresh is False
     assert vs.pose is None
+
+
+def test_min_age_hides_flicker(cfg):
+    import dataclasses
+    cfg.vision = dataclasses.replace(cfg.vision, min_age=3)
+    vs = make_system(cfg)
+    canvas = mat_canvas(cfg)
+    draw_rect(canvas, (200, 150), (60, 20), 0, (0, 0, 220))
+    frame = to_camera(canvas)
+    assert [len(vs.process(frame).objects) for _ in range(4)] == [0, 0, 1, 1]
+
+
+def test_exposure_shift_and_soft_shadow_are_not_objects(cfg):
+    vs = make_system(cfg)
+    canvas = mat_canvas(cfg)
+    dim = (canvas.astype(np.float32) * 0.85).astype(np.uint8)       # auto-exposure drift
+    assert vs.process(to_camera(dim)).objects == []
+    shadow = canvas.copy()
+    shadow[200:400, 300:500] = (shadow[200:400, 300:500].astype(np.float32) * 0.92).astype(np.uint8)
+    assert vs.process(to_camera(shadow)).objects == []
+
+
+def test_marker_misalignment_is_not_an_object(cfg):
+    vs = make_system(cfg)
+    canvas = mat_canvas(cfg)
+    shifted = np.roll(canvas, 3, axis=1)                             # printed markers sit 3 px off the reference
+    assert vs.process(to_camera(shifted)).objects == []

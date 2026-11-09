@@ -12,7 +12,8 @@ import numpy as np
 
 from .config import ConfigError, load_config
 from .intrinsics import DEFAULT_PATH, calibrate, load_intrinsics, view_points
-from .pipeline import VisionSystem
+from .overlay import draw_object
+from .pipeline import FrameSizeError, VisionSystem
 
 
 def open_camera(source):
@@ -27,7 +28,7 @@ def open_camera(source):
 
 
 def draw_overlay(vs: VisionSystem, frame, state):
-    out = frame.copy()
+    out = (vs.last_frame if vs.last_frame is not None else frame).copy()   # pose is in undistorted pixels
     pose = vs.pose
     for mid, c in vs.last_markers.items():
         cv2.polylines(out, [c.astype(np.int32)], True, (0, 255, 0), 2)
@@ -38,15 +39,9 @@ def draw_overlay(vs: VisionSystem, frame, state):
     outline = pose.mat_to_img([[0, 0], [w, 0], [w, h], [0, h]]).astype(np.int32)
     cv2.polylines(out, [outline], True, (255, 200, 0), 2)
     for o in state.objects:
-        gm = vs.frames.base_to_mat(o.grasp_mm[:2])
-        cm = vs.frames.base_to_mat(o.center_mm[:2])
-        gp, cp = pose.mat_to_img(gm)[0], pose.mat_to_img(cm)[0]
-        col = (0, 165, 255) if o.occluded else (0, 0, 255)
-        cv2.circle(out, tuple(int(x) for x in cp), 4, (255, 255, 255), -1)
-        cv2.circle(out, tuple(int(x) for x in gp), 6, col, -1)
-        color_tag = f" {o.color}" if o.color and o.color != "unknown" else ""
-        cv2.putText(out, f"#{o.id}{color_tag} ({o.grasp_mm[0]:.0f},{o.grasp_mm[1]:.0f})",
-                    (int(cp[0]) + 8, int(cp[1]) - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        draw_object(out, vs, o)
+        gp = pose.mat_to_img(vs.frames.base_to_mat(o.grasp_mm[:2]))[0]
+        cv2.circle(out, tuple(int(x) for x in gp), 5, (0, 0, 255), -1)      # grasp point
     if state.arm.visible:
         x, y, z = state.arm.gripper_mm
         g = vs.last_markers[vs.cfg.arm.gripper_marker_id].mean(0)
@@ -87,7 +82,11 @@ def main(argv=None):
             frame = raw_frame.copy()
             if args.no_gui and vs.reference is None:
                 vs.capture_reference(frame)
-            state = vs.process(frame)
+            try:
+                state = vs.process(frame)
+            except FrameSizeError as exc:
+                print(f"skipping frame: {exc}", file=sys.stderr)
+                continue
             print(json.dumps(state.to_dict()), flush=True)
             if args.no_gui:
                 continue
@@ -114,7 +113,7 @@ def main(argv=None):
                         views.clear()
                     calib_size = current_size
                     views.append(vp)
-                    print(f"calibration views: {len(views)} (move the camera/mat; press k with >= 10)", file=sys.stderr)
+                    print(f"calibration views: {len(views)} (move the camera/mat; press k with >= 5, ideally 10+ from varied angles)", file=sys.stderr)
             elif key == ord("k"):
                 try:
                     h, w = raw_frame.shape[:2]
