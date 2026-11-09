@@ -102,6 +102,13 @@ class Home(Action):
 
 
 @_action
+class ReturnToUser(Action):
+    """Come back to the person (the hand-off pose), e.g. "come back to me"."""
+
+    name = "return_to_user"
+
+
+@_action
 class ReturnToZero(Action):
     name = "return_to_zero"
 

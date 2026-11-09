@@ -35,6 +35,7 @@ LIMITS = (
     (0, 180),    # Gripper
 )
 COMMAND_NAMES = {2: 'OPEN_SESSION', 3: 'ARM', 4: 'MOVE', 5: 'STOP', 6: 'HEARTBEAT'}
+VERBOSE = True  # print every TX packet and RX ACK (heartbeats included); callers may turn it off
 
 
 class SessionError(RuntimeError):
@@ -143,7 +144,8 @@ def send(ser, kind, session, counter, payload=b''):
     if ser.write(frame) != len(frame):
         raise OSError('Incomplete serial write')
     ser.flush()
-    print(f'TX kind=0x{kind:02x} counter={counter} bytes={len(frame)}')
+    if VERBOSE:
+        print(f'TX kind=0x{kind:02x} counter={counter} bytes={len(frame)}')
 
 
 def verify_ack(raw, session, counter, command):
@@ -192,7 +194,8 @@ def send_and_wait_ack(ser, kind, session, counter, payload=b'', ack_timeout=0.3)
                 raise ValueError('Receiver session changed while awaiting ACK')
             continue
         verify_ack(raw, session, counter, kind)
-        print(f'RX authenticated ACK command=0x{kind:02x} counter={counter}')
+        if VERBOSE:
+            print(f'RX authenticated ACK command=0x{kind:02x} counter={counter}')
         return
     raise TimeoutError(f'ACK timeout command=0x{kind:02x} counter={counter}; sequence aborted')
 

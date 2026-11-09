@@ -5,7 +5,7 @@ import pytest
 
 from nlp import (
     CloseHand, Give, Home, MoveRelative, ObjectRef, OpenHand, PickUp, Processor, PutDown, PutIn,
-    Reply, ReturnToZero, RotateJoint, Shake,
+    Reply, ReturnToUser, ReturnToZero, RotateJoint, Shake,
 )
 from nlp.parser import Parser, normalize
 
@@ -242,3 +242,27 @@ def test_with_clause_does_not_leak_attributes_or_nouns():
     # the description after "with" belongs to a different object (the cap), so it must not recolour the bottle
     assert parse("grab the bottle with the red cap").actions == [PickUp(ObjectRef("bottle"))]
     assert parse("grab the blue bottle with a handle").actions == [PickUp(ObjectRef("bottle", "blue"))]
+
+
+@pytest.mark.parametrize("text", ["come back to me", "come to me", "return to me", "come back here",
+                                  "go back to me", "please come back to me"])
+def test_come_back_to_me(text):
+    assert parse(text).actions == [ReturnToUser()]
+
+
+def test_plain_come_back_is_still_a_relative_move():
+    assert parse("come back").actions == [MoveRelative("backward")]
+    assert parse("come here").actions == [MoveRelative("forward")]
+
+
+def test_typo_colour_before_the_noun_is_snapped():
+    assert parse("put it in the bluw container").actions == [PutIn(ObjectRef("container", "blue"))]
+    assert parse("grab the greem cup").actions == [PickUp(ObjectRef("cup", "green"))]
+    # the head noun is never turned into a colour
+    assert parse("grab the block").actions == [PickUp(ObjectRef("block"))]
+    assert parse("grab the wooden block").actions == [PickUp(ObjectRef("wooden block"))]
+
+
+def test_grab_put_in_come_back_chain():
+    text = "grab this item, put it in the bluw container, then come back to me"
+    assert parse(text).actions == [PickUp(ObjectRef("item")), PutIn(ObjectRef("container", "blue")), ReturnToUser()]

@@ -14,7 +14,7 @@ Allowed actions (field names exact):
 {"action":"put_in","container":ObjectRef,"target":ObjectRef|null,"relation":"in"|"on"}
 {"action":"give","target":ObjectRef|null}
 {"action":"move_relative","direction":"forward|backward|left|right|up|down","amount":"small|medium|large","distance_mm":number|null}
-{"action":"home"} {"action":"return_to_zero"} {"action":"rotate_joint","joint":int,"angle":number|null,"relative":bool}
+{"action":"home"} {"action":"return_to_user"} {"action":"return_to_zero"} {"action":"rotate_joint","joint":int,"angle":number|null,"relative":bool}
 {"action":"open_hand"} {"action":"close_hand"} {"action":"shake","kind":"yes|no|maybe"}
 {"action":"reply","text":str,"gesture":{"action":"shake","kind":"yes|no|maybe"}|null}
 If the request is not a robot command, answer with a single reply action. Output JSON only."""

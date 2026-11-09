@@ -4,7 +4,7 @@ import pytest
 
 from nlp import (
     CloseHand, Give, Home, MoveRelative, ObjectRef, OpenHand, PickUp, PutDown, PutIn, Reply,
-    ReturnToZero, RotateJoint, Shake,
+    ReturnToUser, ReturnToZero, RotateJoint, Shake,
 )
 from nlp.actions import Action, action_from_dict, actions_from_dicts
 
@@ -12,7 +12,7 @@ CUP = ObjectRef("cup", "red", "big", "left")
 
 ALL = [
     PickUp(CUP), PutDown(), PutDown(CUP), PutIn(CUP), PutIn(CUP, CUP, "on"), Give(), Give(CUP),
-    MoveRelative("up"), MoveRelative("left", "large", 12.5), Home(), ReturnToZero(), RotateJoint(0),
+    MoveRelative("up"), MoveRelative("left", "large", 12.5), Home(), ReturnToUser(), ReturnToZero(), RotateJoint(0),
     RotateJoint(3, -45.0, False), OpenHand(), CloseHand(), Shake("maybe"), Reply("hi"),
     Reply("hi", Shake("no")),
 ]

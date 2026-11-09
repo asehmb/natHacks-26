@@ -74,13 +74,20 @@ struct Esp32ServoBackend {
   // One commanded degree every 30 milliseconds
   const unsigned long STEP_INTERVAL = 30;
 
-  // Keep all motors disabled initially.
-  // Base must remain disabled until assembled.
+  // Joints this backend may drive. The base servo is broken: it is never attached and gets no PWM, so the arm
+  // only moves forward/back in its vertical plane. MOVE still carries (and validates) a base value; it is ignored.
   bool enabled[kJointCount] = {
-    true, true, true, true
+    false, true, true, true
   };
 
   bool attached[kJointCount] = {
+    false, false, false, false
+  };
+
+  // A MOVE target not yet sent to the servo. currentAngles is only the last COMMANDED angle (90 at boot, stale
+  // after STOP detaches the servo), so "target == currentAngles" must not skip a fresh command, or a MOVE to
+  // home / to the previous pose never attaches or drives anything.
+  bool pending[kJointCount] = {
     false, false, false, false
   };
 
@@ -98,6 +105,7 @@ struct Esp32ServoBackend {
 
       // Store target instead of moving immediately.
       desiredAngles[joint] = degrees;
+      pending[joint] = true;
   }
 
 
@@ -111,7 +119,7 @@ void update() {
         if (!enabled[i])
             continue;
 
-        if (currentAngles[i] == desiredAngles[i])
+        if (!pending[i] && currentAngles[i] == desiredAngles[i])
             continue;
 
         if (!attached[i]) {
@@ -124,6 +132,7 @@ void update() {
         motors[i].write(desiredAngles[i]);
 
         currentAngles[i] = desiredAngles[i];
+        pending[i] = false;
     }
 }
 
@@ -136,6 +145,7 @@ void update() {
 
     for (int i = 0; i < kJointCount; ++i) {
       desiredAngles[i] = currentAngles[i];
+      pending[i] = false;
 
       if (attached[i]) {
         motors[i].detach();

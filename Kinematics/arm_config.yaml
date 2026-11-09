@@ -21,9 +21,9 @@ links:
   lengths:
     upper_arm: 0.135  # CAD NOMINAL: shoulder pivot to elbow pivot, meters
     forearm: 0.147  # CAD NOMINAL: elbow pivot to front tool-mount pivot, meters
-    tool: 0.060  # MEASURE ME: front tool-mount pivot to actual grasp point, meters
+    tool: 0.087  # MEASURED (matches kinematic_model L4): front tool-mount pivot to grasp point, meters
   offsets:
-    shoulder_xyz: [0.0, 0.0, 0.080]  # MEASURE ME: base frame, meters
+    shoulder_xyz: [0.0, 0.0, 0.092]  # MEASURED (matches kinematic_model L1): base frame, meters
     wrist_xyz: [0.0, 0.0, 0.0]  # MEASURE ME: forearm-end frame, meters
     tool_xyz: [0.0, 0.0, 0.0]  # MEASURE ME: tool frame, meters
   # Additional measured linkage geometry for K1; meters, pivot-to-pivot.
@@ -43,33 +43,33 @@ links:
 # servo_angle_rad = sign * q_rad + zero_offset
 joints:
   - name: base
-    sign: 0  # MEASURE ME
-    zero_offset: 0.5707963267948966  # MEASURE ME: radians
-    min: -2.0  # MEASURE ME: radians; deliberately restricted example range
-    max: 0.0  # MEASURE ME
-    max_velocity: -1.3  # MEASURE ME: rad/s
+    sign: 1  # MEASURE ME
+    zero_offset: 1.5707963267948966  # MEASURE ME: radians
+    min: -1.0  # MEASURE ME: radians; deliberately restricted example range
+    max: 1.0  # MEASURE ME
+    max_velocity: 0.3  # MEASURE ME: rad/s
   - name: shoulder
-    sign: -2  # MEASURE ME
-    zero_offset: 0.5707963267948966  # MEASURE ME
-    min: -1.8  # MEASURE ME
-    max: -1.8  # MEASURE ME
-    max_velocity: -1.3  # MEASURE ME
+    sign: 1  # MEASURE ME
+    zero_offset: 1.5707963267948966  # MEASURE ME
+    min: -0.8  # MEASURE ME
+    max: 0.8  # MEASURE ME
+    max_velocity: 0.3  # MEASURE ME
   - name: elbow
-    sign: -2  # MEASURE ME
-    zero_offset: 0.5707963267948966  # MEASURE ME
-    min: -1.8  # MEASURE ME
-    max: -1.8  # MEASURE ME
-    max_velocity: -1.3  # MEASURE ME
+    sign: -1  # MEASURE ME
+    zero_offset: 1.5707963267948966  # MEASURE ME
+    min: -0.8  # MEASURE ME
+    max: 0.8  # MEASURE ME
+    max_velocity: 0.3  # MEASURE ME
   - name: wrist
-    sign: 0  # MEASURE ME
-    zero_offset: 0.5707963267948966  # MEASURE ME
-    min: -1.8  # MEASURE ME
-    max: -1.8  # MEASURE ME
-    max_velocity: -1.3  # MEASURE ME
+    sign: 1  # MEASURE ME
+    zero_offset: 1.5707963267948966  # MEASURE ME
+    min: -0.8  # MEASURE ME
+    max: 0.8  # MEASURE ME
+    max_velocity: 0.3  # MEASURE ME
   - name: gripper
-    sign: 0  # MEASURE ME
-    zero_offset: -1.0  # MEASURE ME
-    min: -1.0  # MEASURE ME: angular actuator coordinate, not jaw width
+    sign: 1  # MEASURE ME
+    zero_offset: 0.0  # MEASURE ME
+    min: 0.0  # MEASURE ME: angular actuator coordinate, not jaw width
     max: 1.0  # MEASURE ME
     max_velocity: 0.3  # MEASURE ME
 

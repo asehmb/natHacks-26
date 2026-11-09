@@ -1334,17 +1334,20 @@ class EEZYbotARM_Mk2(EEZYbotARM):
     LAB = 140
     LB3 = 60
 
-    # Joint limits
-    q1_min = -30  # degrees
-    q1_max = 30
-    q2_min = 39
-    q2_max = 120
+    # Joint limits come from the firmware's commanded servo limits (firmware/comms/combined_only/servo_bridge.h,
+    # kMinDegrees / kMaxDegrees; also send_ik.LIMITS), mapped through map_kinematicsToServoAngles:
+    #   servo1 = -2.0497*q1 + 91.726,   servo2 = 180 - q2,   servo3 = q2 + q3 + 135
+    SERVO_LIMITS_DEG = ((0, 180), (20, 160), (15, 130))  # base, shoulder, elbow
+    q1_min = (91.726 - SERVO_LIMITS_DEG[0][1]) / 2.0497  # degrees (servo1 decreases as q1 grows)
+    q1_max = (91.726 - SERVO_LIMITS_DEG[0][0]) / 2.0497
+    q2_min = 180 - SERVO_LIMITS_DEG[1][1]
+    q2_max = 180 - SERVO_LIMITS_DEG[1][0]
     # q3_min, q3_max are given by q3CalcLimits() function
 
     def q3CalcLimits(self, **kwargs):
         """
         Calculate q3 angle limits for the EzzyBot Arm given a value for the angle q2 in degrees
-        These limits have been determined experimentally for the EEzybotMk2
+        Follows the firmware elbow servo limits: servo3 = q2 + q3 + 135 must stay inside SERVO_LIMITS_DEG[2]
 
         If no q2 value is given then the current value of q2 is used 
 
@@ -1358,9 +1361,9 @@ class EEZYbotARM_Mk2(EEZYbotARM):
         # Use **kwarg if provided, otherwise use current q2 value
         q2 = kwargs.get('q2', self.q2)
 
-        # calculate q3 min limits in degrees
-        q3_min = (-0.6755 * q2) - 70.768
-        q3_max = (-0.7165 * q2) - 13.144
+        # elbow servo limits -> q3 limits in degrees
+        q3_min = self.SERVO_LIMITS_DEG[2][0] - 135 - q2
+        q3_max = self.SERVO_LIMITS_DEG[2][1] - 135 - q2
 
         return q3_min, q3_max
 
@@ -1402,7 +1405,7 @@ class EEZYbotARM_Mk2(EEZYbotARM):
         servoAngle_q1 = round(servoAngle_q1, 2)
 
         # Calculate for q2
-        servoAngle_q2 = q2  # Mk2 shoulder direction reversed; verify with unloaded hardware
+        servoAngle_q2 = 180 - q2  # 90 = main arm vertical. servo2 = q2 (538f50b) mirrored it: the arm jerked backwards
         servoAngle_q2 = round(servoAngle_q2, 2)
 
         # Calculate for q3
