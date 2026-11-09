@@ -85,7 +85,41 @@ required failure cases, no later MOVE or automatic STOP after failure, and fresh
 session plus explicit ARM recovery. The combined sketch simulation runs the
 production sender long enough for repeated background heartbeats.
 
-Remaining: physical verification of this host lifecycle, expanded physical
-rejection/reconnect tests, and joint integration with F1's real servo backend. The earlier
+## Recorded physical USB result
+
+User reported that the updated send_ik.py USB test passed on the physical ESP32
+using Windows COM3 and the outputs-disabled combined_only sketch. The tested
+sequence was authenticated HELLO/OPEN_SESSION, ARM, MOVE, repeated background
+HEARTBEAT exchanges, and STOP, with expected authenticated ACKs and successful
+completion. The user subsequently supplied the full normal-path transcript,
+including four accepted HEARTBEAT ACKs and the accepted STOP ACK. Physical servo
+outputs were disabled; no servo behavior or movement
+is verified by this result. This short normal-path run does not establish
+long-duration reliability or physical rejection/recovery behavior.
+
+Receiver rejection/reconnect tests subsequently passed on the physical ESP32;
+see REJECTION_TEST.md for the supplied console output summary. Outputs remained
+disabled and no MOVE was sent in that checkpoint.
+
+Physical host heartbeat ACK-failure testing subsequently passed all nine
+controlled reply-injection cases on COM3; see HEARTBEAT_FAULT_TEST.md. Each fault
+invalidated the host session and blocked later traffic without automatic STOP.
+
+The five-minute physical COM3 reliability run subsequently passed with 1,198
+authenticated heartbeats, 266 ms maximum host transmit gap, unchanged receiver
+timeout count, no session rotation and accepted STOP. Outputs remained disabled
+and no MOVE was sent; see RELIABILITY_TEST.md for metrics and interrupted-run
+history.
+
+Remaining: joint integration with F1's real servo backend. Additional reliability
+runs can broaden the evidence beyond the single five-minute pass. The earlier
 test_doc.md handoff describes the pre-ACK sender; this document supersedes its
 statements about missing host ACK verification.
+
+HEARTBEAT_FAULT_TEST.md describes the prepared USB host ACK-failure harness.
+It passed laptop simulation and the user-supplied physical COM3 run. The harness uses a real
+receiver exchange with test-only ACK dropping/mutation, without changing the
+firmware or sending MOVE/STOP commands.
+
+RELIABILITY_TEST.md describes the prepared five-minute keepalive test. Its
+two-second laptop smoke test and the physical five-minute run both passed.

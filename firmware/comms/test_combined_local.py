@@ -142,3 +142,24 @@ int poll_byte() {
         raise AssertionError('No simulated HELLO for production sender')
     send_sequence(serial, session, payload_for_angles([90, 85, 100, 90]), hold_seconds=0.8)
     print('PASS: production sender verified all ACKs from mocked combined firmware')
+    from test_rejections_usb import run as run_rejections
+    time.sleep(0.55)
+    lib.poll_byte()
+    writes_before = lib.mock_writes()
+    run_rejections(Serial())
+    assert lib.mock_writes() == writes_before, 'Rejection test must never write servo targets'
+    print('PASS: rejection/reconnect USB harness verified in LAPTOP SIMULATION')
+    from test_heartbeat_faults_usb import run as run_heartbeat_faults
+    time.sleep(0.6)
+    lib.poll_byte()
+    writes_before = lib.mock_writes()
+    run_heartbeat_faults(Serial())
+    assert lib.mock_writes() == writes_before
+    print('PASS: USB host heartbeat fault harness verified in LAPTOP SIMULATION')
+    from test_heartbeat_reliability import run as run_reliability
+    time.sleep(0.6)
+    lib.poll_byte()
+    writes_before = lib.mock_writes()
+    run_reliability(Serial(), seconds=2)
+    assert lib.mock_writes() == writes_before
+    print('PASS: reliability harness short smoke test in LAPTOP SIMULATION (not a five-minute run)')
