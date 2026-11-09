@@ -155,12 +155,12 @@ def servo_to_joint(servo_deg: Sequence[float]) -> Vec3:
 
     MUST stay in sync with map_kinematicsToServoAngles (a test guards this):
         servo1 = -2.0497 * q1 + 91.726
-        servo2 = 180 - q2
+        servo2 = q2
         servo3 = q2 + q3 + 135
     """
     s1, s2, s3 = servo_deg
     q1 = (s1 - 91.726) / -2.0497
-    q2 = 180.0 - s2
+    q2 = s2
     q3 = s3 - 135.0 - q2
     return _rad((q1, q2, q3))
 
