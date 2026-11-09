@@ -215,6 +215,23 @@ bool build_hello_packet(
     return true;
 }
 
+bool build_open_session_ack(const ReceiverState *state, const uint8_t key[32],
+                            uint8_t packet[62])
+{
+    if (!state || !key || !packet || !state->session_active || state->armed ||
+        state->last_counter != 1) return false;
+    uint8_t ack[62] = {0x41, 0x52, 1, 1, ARMLINK_ACK, 3, 0};
+    memcpy(ack + 7, state->session_id, 16);
+    for (size_t i = 0; i < 4; ++i)
+        ack[23 + i] = (uint8_t)(state->last_counter >> (8 * i));
+    ack[27] = ARMLINK_OPEN_SESSION;
+    ack[28] = 1;
+    ack[29] = 0;
+    if (!calculate_packet_hmac(ack, sizeof ack, key, ack + 30)) return false;
+    memcpy(packet, ack, sizeof ack);
+    return true;
+}
+
 bool receive_heartbeat(ReceiverState *state, const uint8_t *packet, size_t length,
                        const uint8_t key[32], uint32_t now_ms)
 {

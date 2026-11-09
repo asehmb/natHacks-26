@@ -5,6 +5,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 enum {
     ARMLINK_HELLO        = 0x01,
     ARMLINK_OPEN_SESSION = 0x02,
@@ -74,4 +78,12 @@ bool build_hello_packet(
     const uint8_t key[32],
     uint8_t packet[59]);
 
+// Accepted OPEN_SESSION ACK: header counter echoes the accepted host counter;
+// payload is [OPEN_SESSION, session_active=1, armed=0]. Signed device direction.
+bool build_open_session_ack(const ReceiverState *state, const uint8_t key[32],
+                            uint8_t packet[62]);
+
+#ifdef __cplusplus
+}
+#endif
 #endif
